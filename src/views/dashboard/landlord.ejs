@@ -1,0 +1,13 @@
+<%- include('../partials/header', { title: 'Landlord dashboard' }) %>
+<h1>Landlord dashboard</h1>
+<% if (currentUser.status === 'PENDING') { %>
+  <p class="alert">Your account is <strong>pending approval</strong> by SCU Housing. You can set up
+    properties, but you can't publish listings until an admin approves your account.</p>
+<% } %>
+<p>Coming soon:</p>
+<ul class="todo">
+  <li>Properties, units, and floor plans</li>
+  <li>Listings: submit for approval, revise when changes are requested</li>
+  <li>Applications to your listings: request documents, make or rescind offers</li>
+</ul>
+<%- include('../partials/footer') %>
