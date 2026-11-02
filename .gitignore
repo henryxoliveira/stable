@@ -1,0 +1,32 @@
+# Secrets: never commit. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+
+# Google Cloud service-account keys
+*-key.json
+*.key.json
+service-account*.json
+credentials*.json
+
+# Dependencies / build output
+node_modules/
+coverage/
+dist/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Local uploads (production uploads go to GCS, never the filesystem)
+uploads/
+tmp/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Claude Code personal settings (the shared .claude/settings.json IS tracked)
+.claude/settings.local.json
