@@ -2,7 +2,7 @@
 
 Stable is a class prototype for Santa Clara University (two-person team). It lets SCU students find,
 compare, and apply as roommate groups for on- and off-campus housing. Landlords manage listings
-and review applications, and SCU Housing admins approve landlords and listings. It is **not**
+and review applications, and Stable admins approve landlords and listings. It is **not**
 connected to real SCU systems. Listing data is seeded by the team (never scraped). Never use SCU
 logos or Bronco marks. The palette (pine `#2F5D50`, hay `#E8B04B`, cream `#F6F1E7`) and the icon are original.
 
