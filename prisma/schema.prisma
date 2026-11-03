@@ -1,0 +1,54 @@
+// Stable database schema (Neon Postgres via Prisma).
+//
+// RULES (see CLAUDE.md):
+//  - Every change ships as a NEW migration: `npm run db:migrate -- --name <what_changed>`.
+//  - Production only ever runs `prisma migrate deploy`. Never `migrate reset` or `db push`.
+//  - Table/column names are snake_case in Postgres (@@map / @map) so raw SQL stays readable.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  LANDLORD
+  ADMIN
+}
+
+/// ACTIVE: can use everything their role allows.
+/// PENDING: landlord awaiting admin approval; can log in but cannot publish.
+/// SUSPENDED: cannot log in (existing sessions are dropped on next request).
+enum UserStatus {
+  ACTIVE
+  PENDING
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  email        String     @unique // stored lowercased
+  passwordHash String     @map("password_hash") // argon2id; never selected into views or JSON
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+/// Server-side sessions, owned by connect-pg-simple (express-session store).
+/// Declared here so Prisma migrations create it and never try to drop it.
+/// Do not query or change this table from application code.
+model Session {
+  sid    String   @id @db.VarChar
+  sess   Json     @db.Json
+  expire DateTime @db.Timestamp(6)
+
+  @@index([expire], map: "IDX_session_expire")
+  @@map("session")
+}
