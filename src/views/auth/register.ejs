@@ -10,7 +10,7 @@
       <label class="radio"><input type="radio" name="role" value="STUDENT" <%= values.role !== 'LANDLORD' ? 'checked' : '' %>>
         Student (requires an @<%= locals.domain || 'scu.edu' %> email)</label>
       <label class="radio"><input type="radio" name="role" value="LANDLORD" <%= values.role === 'LANDLORD' ? 'checked' : '' %>>
-        Landlord / property manager (approved by SCU Housing before you can publish)</label>
+        Landlord / property manager (approved by a Stable admin before you can publish)</label>
       <%- include('../partials/field-error', { field: 'role' }) %>
     </fieldset>
 

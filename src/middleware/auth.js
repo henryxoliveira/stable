@@ -67,7 +67,9 @@ export function requireRole(...roles) {
 export function requireActiveAccount(req, res, next) {
   if (!req.user) return next(unauthorized());
   if (req.user.status !== 'ACTIVE') {
-    return next(forbidden('Your account is pending approval by SCU Housing.', 'ACCOUNT_PENDING'));
+    return next(
+      forbidden('Your account is pending approval by a Stable admin.', 'ACCOUNT_PENDING'),
+    );
   }
   next();
 }
