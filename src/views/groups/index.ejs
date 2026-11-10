@@ -1,0 +1,74 @@
+<%- include('../partials/header', { title: 'Roommate groups' }) %>
+<h1>Roommate groups</h1>
+<p class="muted">One group per term. A group is <strong>ready</strong> when it has at least one member
+  and nobody is still invited. Groups hold up to <%= maxSeats %> seats (members + pending invites).</p>
+
+<% if (errors._form) { %><p class="alert" role="alert"><%= errors._form %></p><% } %>
+
+<section class="card">
+  <h2>Invitations for <%= currentUser.email %></h2>
+  <% if (invitations.length === 0) { %>
+    <p class="muted">No pending invitations.</p>
+  <% } else { %>
+    <ul class="rows">
+      <% invitations.forEach((inv) => { %>
+        <li>
+          <span><a href="/groups/<%= inv.group.id %>"><%= inv.group.name %></a>
+            · <%= inv.group.term %> · from <%= inv.group.ownerEmail %></span>
+          <span class="actions">
+            <form method="post" action="/invites/<%= inv.id %>/accept" class="inline">
+              <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+              <button type="submit" class="btn small">Accept</button>
+            </form>
+            <form method="post" action="/invites/<%= inv.id %>/decline" class="inline">
+              <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+              <button type="submit" class="btn small secondary">Decline</button>
+            </form>
+          </span>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+
+<section class="card">
+  <h2>My groups</h2>
+  <% if (groups.length === 0) { %>
+    <p class="muted">You aren't in any group yet.</p>
+  <% } else { %>
+    <ul class="rows">
+      <% groups.forEach((g) => { %>
+        <li>
+          <span><a href="/groups/<%= g.id %>"><%= g.name %></a> · <%= g.term %>
+            <% if (g.isOwner) { %><span class="badge">owner</span><% } %></span>
+          <span>
+            <%= g.memberCount %> member<%= g.memberCount === 1 ? '' : 's' %>,
+            <%= g.pendingInviteCount %> pending ·
+            <% if (g.ready) { %><span class="badge ready">ready</span><% } else { %><span class="badge">not ready</span><% } %>
+          </span>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+
+<section class="card">
+  <h2>Create a group</h2>
+  <form method="post" action="/groups" novalidate>
+    <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+    <label for="name">Group name</label>
+    <input id="name" name="name" type="text" maxlength="60" required value="<%= values.name || '' %>">
+    <%- include('../partials/field-error', { field: 'name' }) %>
+
+    <label for="term">Term</label>
+    <select id="term" name="term" required>
+      <% terms.forEach((t) => { %>
+        <option value="<%= t.value %>" <%= values.term === t.value ? 'selected' : '' %>><%= t.label %></option>
+      <% }) %>
+    </select>
+    <%- include('../partials/field-error', { field: 'term' }) %>
+
+    <button type="submit" class="btn">Create group</button>
+  </form>
+</section>
+<%- include('../partials/footer') %>

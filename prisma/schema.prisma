@@ -38,6 +38,11 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
+  ownedGroups      RoommateGroup[]
+  groupMemberships GroupMember[]
+  sentInvitations  GroupInvitation[]
+  groupEvents      GroupEvent[]
+
   @@map("users")
 }
 
@@ -51,4 +56,106 @@ model Session {
 
   @@index([expire], map: "IDX_session_expire")
   @@map("session")
+}
+
+// ---------------------------------------------------------------------------
+// Roommate groups (roadmap B1). Logic lives in src/services/group.service.js.
+// ---------------------------------------------------------------------------
+
+/// ACTIVE: normal. DISBANDED: the sole owner left; hidden from everyone but admins.
+enum GroupStatus {
+  ACTIVE
+  DISBANDED
+}
+
+/// An invitation is tied to an EMAIL, so people can be invited before they register.
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+enum GroupEventType {
+  CREATED
+  INVITED
+  INVITE_CANCELLED
+  INVITE_ACCEPTED
+  INVITE_DECLINED
+  OWNERSHIP_TRANSFERRED
+  MEMBER_LEFT
+  DISBANDED
+}
+
+/// A roommate group for one term (e.g. FALL-2027).
+model RoommateGroup {
+  id        String      @id @default(uuid()) @db.Uuid
+  name      String
+  term      String // "FALL-2027", validated by zod
+  ownerId   String      @map("owner_id") @db.Uuid
+  status    GroupStatus @default(ACTIVE)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  owner       User              @relation(fields: [ownerId], references: [id])
+  members     GroupMember[]
+  invitations GroupInvitation[]
+  events      GroupEvent[]
+
+  @@index([term])
+  @@map("roommate_groups")
+}
+
+/// Accepted members only. The row is DELETED when a member leaves
+/// (history stays in group_events).
+model GroupMember {
+  id       String   @id @default(uuid()) @db.Uuid
+  groupId  String   @map("group_id") @db.Uuid
+  userId   String   @map("user_id") @db.Uuid
+  /// Copied from the group so the database itself can enforce
+  /// "one group per student per term" with the unique index below.
+  term     String
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  group RoommateGroup @relation(fields: [groupId], references: [id])
+  user  User          @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+  @@unique([userId, term])
+  @@map("group_members")
+}
+
+/// Pending/answered invitations, matched to accounts by email when read.
+/// One row per (group, email): re-inviting resets the row to PENDING.
+model GroupInvitation {
+  id          String           @id @default(uuid()) @db.Uuid
+  groupId     String           @map("group_id") @db.Uuid
+  email       String // lowercased
+  status      InvitationStatus @default(PENDING)
+  invitedById String           @map("invited_by_id") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at")
+  respondedAt DateTime?        @map("responded_at")
+
+  group     RoommateGroup @relation(fields: [groupId], references: [id])
+  invitedBy User          @relation(fields: [invitedById], references: [id])
+
+  @@unique([groupId, email])
+  @@index([email, status])
+  @@map("group_invitations")
+}
+
+/// Append-only audit log: who did what to a group, and when.
+model GroupEvent {
+  id        String         @id @default(uuid()) @db.Uuid
+  groupId   String         @map("group_id") @db.Uuid
+  actorId   String         @map("actor_id") @db.Uuid
+  type      GroupEventType
+  detail    Json? // e.g. { "email": "..." } or { "fromUserId": "...", "toUserId": "..." }
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  group RoommateGroup @relation(fields: [groupId], references: [id])
+  actor User          @relation(fields: [actorId], references: [id])
+
+  @@index([groupId, createdAt])
+  @@map("group_events")
 }

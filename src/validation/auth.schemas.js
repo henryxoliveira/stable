@@ -5,7 +5,8 @@
 import { z } from 'zod';
 import { config } from '../config/env.js';
 
-const email = z
+/** Trimmed, lowercased email. Shared with the group invite schema. */
+export const email = z
   .string({ error: 'Email is required.' })
   .trim()
   .toLowerCase()

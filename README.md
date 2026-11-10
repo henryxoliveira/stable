@@ -5,7 +5,7 @@
 A horse's home is its stable. The name is a nod to the SCU Broncos.
 
 - **Public URL:** TODO (Cloud Run URL after first deploy)
-- **Status:** skeleton + authentication foundation. Features are being built in PRs (see [Roadmap](#roadmap)).
+- **Status:** authentication foundation and roommate groups are built. Other features are being built in PRs (see [Roadmap](#roadmap)).
 
 > Stable is a student class prototype. It is **not** affiliated with or endorsed by SCU Housing, does not
 > connect to any SCU system, and uses team-seeded listing data (nothing is scraped from Zillow,
@@ -70,7 +70,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Interactive map (Leaflet + OpenStreetMap), with price, units, and floor plans per pin | ⬜     |
 | Search filters: price per person, distance to campus (haversine), bedrooms            | ⬜     |
 | Saved listings                                                                        | ⬜     |
-| Roommate groups per term (invite, accept, decline)                                    | ⬜     |
+| Roommate groups per term (invite by email, accept, decline, transfer, leave, history) | ✅     |
 | Group application lifecycle, document requests, offers with deadlines                 | ⬜     |
 | Offer acceptance with row locking; competing applications auto-closed                 | ⬜     |
 | Cost calculator: per-person rent, utilities, and parking, on- vs. off-campus          | ⬜     |
@@ -97,6 +97,8 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Owns this specific record                | `assertOwnership` / `loadOwned` in `src/middleware/authorize.js`                               |
 | Can't self-register as admin             | zod enum in `src/validation/auth.schemas.js` **and** a guard in `src/services/auth.service.js` |
 | Unapproved listings hidden from students | Prisma `where` filter in the listing service (TODO)                                            |
+| Group page/actions: member or invitee    | `loadAccess()` in `src/services/group.service.js` (404 for anyone else; admins may view)       |
+| Group owner-only actions                 | `requireOwner()` in `src/services/group.service.js` (403 for members and invitees)             |
 
 ## Record ownership rules
 
@@ -130,9 +132,64 @@ Only `approved` listings appear on the map or in student search results.
 
 ### B. Roommate group
 
-A student creates a group for a term and invites others by email. Invitees accept or decline. A student
-can be in **only one active group per term**. The group is **ready** (allowed to apply) when every member
-has accepted.
+A student creates a group with a name and a term. The term is picked from a dropdown of the **current SCU
+quarter plus the next 5** (quarters: WINTER Jan–Mar, SPRING Apr–Jun, SUMMER Jul–Aug, FALL Sep–Dec, read on
+Pacific time). The list comes from `upcomingTerms()` in `src/services/group.service.js`. The same function feeds
+the zod schema, so the server rejects any other term (past, too far ahead, or malformed) with a 400, not just a
+bad format. Values look like `FALL-2026`; the dropdown shows "Fall 2026". The creator becomes the **owner** and
+the first accepted member.
+
+**Members and invitations are stored separately.** `group_members` holds accepted members (tied to a user).
+`group_invitations` holds invitations tied to an **email address** (lowercased, must end in `@scu.edu`), so
+the owner can invite someone who hasn't registered yet. Invitations are matched to `req.user.email` when they
+are read, so they appear as soon as the person registers or logs in. The invite response is identical whether
+or not the email has an account, so inviting can't be used to find out who is registered.
+
+Invitation states (one row per group + email; re-inviting resets the row to `PENDING`):
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: owner invites email
+    PENDING --> ACCEPTED: invitee accepts (becomes a member)
+    PENDING --> DECLINED: invitee declines
+    PENDING --> CANCELLED: owner cancels, or group disbanded
+    DECLINED --> PENDING: owner re-invites
+    CANCELLED --> PENDING: owner re-invites
+    ACCEPTED --> PENDING: owner re-invites after the member left
+```
+
+Group states:
+
+```mermaid
+stateDiagram-v2
+    [*] --> ACTIVE: student creates group (owner = creator)
+    ACTIVE --> ACTIVE: invite / accept / decline / cancel / transfer ownership / member leaves
+    ACTIVE --> DISBANDED: owner leaves as the only member (pending invites cancelled)
+```
+
+Rules (all enforced on the server):
+
+| Rule                                                                         | Failure                         |
+| ---------------------------------------------------------------------------- | ------------------------------- |
+| Only students use group routes; admins may view any group page               | landlord 403, admin action 403  |
+| Not a member or invitee (or the group is disbanded)                          | 404                             |
+| Only the current owner can invite, cancel invites, or transfer ownership     | 403                             |
+| Only the invitee (logged in with the invited email) can accept or decline    | 404 for anyone else             |
+| At most **16 seats** (accepted members + pending invites), `MAX_GROUP_SEATS` | 409 `GROUP_FULL`                |
+| No self-invite; no duplicate pending invite; no inviting an existing member  | 400 / 409 `INVITE_EXISTS` / 409 |
+| A student is an accepted member of **at most one group per term**            | 409 `ALREADY_IN_GROUP_FOR_TERM` |
+| The owner can't leave while other members remain (transfer first)            | 409 `TRANSFER_OWNERSHIP_FIRST`  |
+| Transfer target must be another accepted member                              | 400                             |
+
+- **Ready** = at least one accepted member and **no pending invitations**. Only ready groups will be able to apply (B3).
+- **Locking.** Every change runs in one Prisma transaction. When a transaction needs both locks, it takes the
+  student's `users` row first (`SELECT … FOR UPDATE`, a tagged `$queryRaw`), then the `roommate_groups` row.
+  Two simultaneous accepts by the same student queue on the user lock, so the second sees the first membership
+  and gets 409. The group lock stops a disband from racing with an accept or an invite, and keeps the seat count
+  from going over 16. A unique index on `group_members(user_id, term)` is a database backstop in case the lock is
+  ever skipped.
+- Every change writes a `group_events` row (actor, type, detail, time) in the same transaction, including
+  transfers and disbanding. The group page shows this history to members and admins.
 
 ### C. Group application → offer
 
@@ -283,12 +340,29 @@ the group. An offer stores `offerExpiresAt`.
 
 ## Data model
 
-**Implemented now** (`prisma/schema.prisma`, migration `20261102000000_init`):
+**Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init` and `20261110030323_roommate_groups`):
 
 | Table     | Columns                                                                                                                                                                 | Notes                        |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | `users`   | `id` (uuid), `email` (unique, lowercased), `password_hash` (argon2id), `role` (STUDENT/LANDLORD/ADMIN), `status` (ACTIVE/PENDING/SUSPENDED), `created_at`, `updated_at` |                              |
 | `session` | `sid`, `sess` (json), `expire`                                                                                                                                          | Managed by connect-pg-simple |
+
+| Table               | Columns                                                                                                                                                                                            | Notes                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `roommate_groups`   | `id`, `name`, `term`, `owner_id` → users, `status` (ACTIVE/DISBANDED), `created_at`, `updated_at`                                                                                                  | Index on `term`                                                                      |
+| `group_members`     | `id`, `group_id` → roommate_groups, `user_id` → users, `term` (copied from the group), `joined_at`                                                                                                 | Accepted members only. Unique `(group_id, user_id)` and **unique `(user_id, term)`** |
+| `group_invitations` | `id`, `group_id`, `email` (lowercased), `status` (PENDING/ACCEPTED/DECLINED/CANCELLED), `invited_by_id`, `created_at`, `responded_at`                                                              | Tied to an email, not a user. Unique `(group_id, email)`; index `(email, status)`    |
+| `group_events`      | `id`, `group_id`, `actor_id` → users, `type` (CREATED, INVITED, INVITE_CANCELLED, INVITE_ACCEPTED, INVITE_DECLINED, OWNERSHIP_TRANSFERRED, MEMBER_LEFT, DISBANDED), `detail` (jsonb), `created_at` | Append-only audit log                                                                |
+
+```mermaid
+erDiagram
+    users ||--o{ roommate_groups : owns
+    roommate_groups ||--o{ group_members : has
+    users ||--o{ group_members : "is"
+    roommate_groups ||--o{ group_invitations : "invites (by email)"
+    roommate_groups ||--o{ group_events : "audit log"
+    users ||--o{ group_events : "actor"
+```
 
 **Planned** (each one will arrive in a migration in the PR that needs it):
 
@@ -302,8 +376,6 @@ erDiagram
     listings ||--o{ listing_reviews : "admin comments"
     listings ||--o{ photos : has
     users ||--o{ saved_listings : saves
-    roommate_groups ||--o{ group_members : has
-    users ||--o{ group_members : "is"
     roommate_groups ||--o{ applications : submits
     units ||--o{ applications : "applied to"
     applications ||--o{ application_events : "audit log"
@@ -313,7 +385,6 @@ erDiagram
 
 Key fields (planned): `properties(lat, lng, address)`, `units(bedrooms, beds, rent_cents, utilities_cents,
 parking_cents, status available|leased)`, `listings(status, kind off_campus|on_campus|sublease, owner_id)`,
-`roommate_groups(term, owner_id)`, `group_members(status invited|accepted|declined)`,
 `applications(status, offer_expires_at)`, `application_events(actor_id, from_status, to_status, comment, created_at)`.
 Money is stored in integer cents.
 
@@ -459,33 +530,54 @@ there, and record the result in [Test scenarios](#test-scenarios-and-results).
 Automated tests: `npm test` (Vitest + Supertest, real Postgres). Each Supertest agent is a separate
 browser with its own cookies.
 
-| #   | Scenario                                                                                | Accounts used    | Expected                                                      | Actual                      |
-| --- | --------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------- | --------------------------- |
-| 1   | Register a student with an `@scu.edu` email                                             | new student      | 302 → dashboard, ACTIVE, argon2id hash, `/api/me` has no hash | ✅ pass (automated)         |
-| 2   | Register a student with `gmail.com`, `scu.edu.evil.com`, or `notscu.edu`                | 3 anonymous      | 400, no user created                                          | ✅ pass (automated)         |
-| 3   | Public registration with `role=ADMIN`                                                   | anonymous        | 400, no admin created                                         | ✅ pass (automated)         |
-| 4   | Register a landlord                                                                     | new landlord     | PENDING                                                       | ✅ pass (automated)         |
-| 5   | Missing fields, short password, duplicate email                                         | anonymous        | 400 / 400 / 409                                               | ✅ pass (automated)         |
-| 6   | Form POST without a CSRF token                                                          | anonymous        | 403                                                           | ✅ pass (automated)         |
-| 7   | Login changes the session id; cookie is HttpOnly and SameSite=Lax                       | student          | new sid                                                       | ✅ pass (automated)         |
-| 8   | Wrong password and unknown email                                                        | anonymous        | same 401 message                                              | ✅ pass (automated)         |
-| 9   | Logout, then replay the old cookie from another client                                  | student          | session row deleted; 401                                      | ✅ pass (automated)         |
-| 10  | Suspended user                                                                          | student          | existing session 401; login 401                               | ✅ pass (automated)         |
-| 11  | Anonymous access to `/`, `/dashboard`, `/dashboard/admin`, an unknown path              | anonymous        | 302 → `/login`                                                | ✅ pass (automated)         |
-| 12  | Anonymous `GET /api/me`                                                                 | anonymous        | 401 `{ error: { code, message } }`                            | ✅ pass (automated)         |
-| 13  | Student opens the admin or landlord dashboard                                           | student          | 403                                                           | ✅ pass (automated)         |
-| 14  | Pending landlord submits a listing                                                      | pending landlord | 403 `ACCOUNT_PENDING`                                         | ✅ pass (automated)         |
-| 15  | Active landlord submits (feature stub)                                                  | active landlord  | passes checks → 501                                           | ✅ pass (automated)         |
-| 16  | Invalid route param                                                                     | active landlord  | 400 `VALIDATION_ERROR`                                        | ✅ pass (automated)         |
-| 17  | Ownership helper: owner, admin, other landlord                                          | unit test        | allow, allow, 404                                             | ✅ pass (automated)         |
-| 18  | `seed:admin` twice, then with an existing non-admin email                               | script           | created → exists (hash unchanged) → conflict (not promoted)   | ✅ pass (automated)         |
-| 19  | Student A applies, Landlord reviews, Student C (not in the group) reads the application | A, L, C          | C gets 404                                                    | TODO                        |
-| 20  | Two groups accept offers for the same unit at the same time                             | groups 1 and 2   | exactly one is accepted                                       | TODO                        |
-| 21  | Offer past its deadline                                                                 | group, landlord  | `expired`, unit available                                     | TODO                        |
-| 22  | Cost split: $4,000 rent + $200 utilities, 3 people                                      | unit test        | per-person amount and remainder handled                       | TODO                        |
-| 23  | Data still present after a redeploy (account, listing, uploaded floor plan)             | any              | all present                                                   | TODO (manual, on Cloud Run) |
+| #   | Scenario                                                                                  | Accounts used    | Expected                                                      | Actual                      |
+| --- | ----------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------- | --------------------------- |
+| 1   | Register a student with an `@scu.edu` email                                               | new student      | 302 → dashboard, ACTIVE, argon2id hash, `/api/me` has no hash | ✅ pass (automated)         |
+| 2   | Register a student with `gmail.com`, `scu.edu.evil.com`, or `notscu.edu`                  | 3 anonymous      | 400, no user created                                          | ✅ pass (automated)         |
+| 3   | Public registration with `role=ADMIN`                                                     | anonymous        | 400, no admin created                                         | ✅ pass (automated)         |
+| 4   | Register a landlord                                                                       | new landlord     | PENDING                                                       | ✅ pass (automated)         |
+| 5   | Missing fields, short password, duplicate email                                           | anonymous        | 400 / 400 / 409                                               | ✅ pass (automated)         |
+| 6   | Form POST without a CSRF token                                                            | anonymous        | 403                                                           | ✅ pass (automated)         |
+| 7   | Login changes the session id; cookie is HttpOnly and SameSite=Lax                         | student          | new sid                                                       | ✅ pass (automated)         |
+| 8   | Wrong password and unknown email                                                          | anonymous        | same 401 message                                              | ✅ pass (automated)         |
+| 9   | Logout, then replay the old cookie from another client                                    | student          | session row deleted; 401                                      | ✅ pass (automated)         |
+| 10  | Suspended user                                                                            | student          | existing session 401; login 401                               | ✅ pass (automated)         |
+| 11  | Anonymous access to `/`, `/dashboard`, `/dashboard/admin`, an unknown path                | anonymous        | 302 → `/login`                                                | ✅ pass (automated)         |
+| 12  | Anonymous `GET /api/me`                                                                   | anonymous        | 401 `{ error: { code, message } }`                            | ✅ pass (automated)         |
+| 13  | Student opens the admin or landlord dashboard                                             | student          | 403                                                           | ✅ pass (automated)         |
+| 14  | Pending landlord submits a listing                                                        | pending landlord | 403 `ACCOUNT_PENDING`                                         | ✅ pass (automated)         |
+| 15  | Active landlord submits (feature stub)                                                    | active landlord  | passes checks → 501                                           | ✅ pass (automated)         |
+| 16  | Invalid route param                                                                       | active landlord  | 400 `VALIDATION_ERROR`                                        | ✅ pass (automated)         |
+| 17  | Ownership helper: owner, admin, other landlord                                            | unit test        | allow, allow, 404                                             | ✅ pass (automated)         |
+| 18  | `seed:admin` twice, then with an existing non-admin email                                 | script           | created → exists (hash unchanged) → conflict (not promoted)   | ✅ pass (automated)         |
+| 19  | Student A applies, Landlord reviews, Student C (not in the group) reads the application   | A, L, C          | C gets 404                                                    | TODO                        |
+| 20  | Two groups accept offers for the same unit at the same time                               | groups 1 and 2   | exactly one is accepted                                       | TODO                        |
+| 21  | Offer past its deadline                                                                   | group, landlord  | `expired`, unit available                                     | TODO                        |
+| 22  | Cost split: $4,000 rent + $200 utilities, 3 people                                        | unit test        | per-person amount and remainder handled                       | TODO                        |
+| 23  | Data still present after a redeploy (account, listing, uploaded floor plan)               | any              | all present                                                   | TODO (manual, on Cloud Run) |
+| 24  | Create group (form) → invite 2 → both accept                                              | A, B, C          | not ready while pending; ready after; 5 audit events          | ✅ pass (automated)         |
+| 25  | Invite an email before that person registers; they register and accept                    | A, D             | invite appears right after registering; D becomes a member    | ✅ pass (automated)         |
+| 26  | Invite a registered vs. an unregistered email                                             | A                | identical status and response shape                           | ✅ pass (automated)         |
+| 27  | Decline, then the owner re-invites                                                        | A, B             | B accepts; still one invitation row                           | ✅ pass (automated)         |
+| 28  | Owner cancels an invite; invitee then tries to accept                                     | A, B             | invite gone; accept 404; second cancel 409                    | ✅ pass (automated)         |
+| 29  | Transfer ownership, then the old owner leaves                                             | A, B             | B owns; A gets 404 on the group                               | ✅ pass (automated)         |
+| 30  | Owner leaves while other members remain                                                   | A, B             | 409 `TRANSFER_OWNERSHIP_FIRST`                                | ✅ pass (automated)         |
+| 31  | Transfer to a non-member or to yourself                                                   | A                | 400                                                           | ✅ pass (automated)         |
+| 32  | Sole owner leaves                                                                         | A, B (invited)   | DISBANDED, invite CANCELLED, `DISBANDED` event                | ✅ pass (automated)         |
+| 33  | Join a second group for the same term (accept, then create)                               | A, B, C          | 409 `ALREADY_IN_GROUP_FOR_TERM`; another term works           | ✅ pass (automated)         |
+| 34  | Two simultaneous accepts for the same term                                                | B                | exactly one 200, one 409; one membership row                  | ✅ pass (automated)         |
+| 35  | Stranger opens the group or tries any action                                              | S                | 404 everywhere; no events written                             | ✅ pass (automated)         |
+| 36  | Non-owner member or invitee invites, cancels, or transfers                                | B, C             | 403; invitee doesn't see pending emails or history            | ✅ pass (automated)         |
+| 37  | Landlord uses group routes; admin views a group                                           | L, admin         | landlord 403; admin 200 to view, 403 to act                   | ✅ pass (automated)         |
+| 38  | Malformed term or empty name (JSON and HTML form)                                         | A                | 400 with field errors; form re-rendered; no group created     | ✅ pass (automated)         |
+| 42  | Past term (`FALL-2025`) or a term past the 6-quarter window                               | A                | 400 "Choose one of the upcoming terms"                        | ✅ pass (automated)         |
+| 43  | Create form term dropdown                                                                 | A                | options = `upcomingTerms()`, labels like "Fall 2026"          | ✅ pass (automated)         |
+| 44  | `upcomingTerms()` on fixed dates (Nov 9 2026, Jan 15 2027, quarter edges, Dec 31 Pacific) | unit test        | current quarter + next 5, year rolls over after FALL          | ✅ pass (automated)         |
+| 39  | Malformed uuid in a route                                                                 | A                | 400                                                           | ✅ pass (automated)         |
+| 40  | Non-`@scu.edu` invite, self-invite, duplicate invite                                      | A                | 400 / 400 / 409 `INVITE_EXISTS`                               | ✅ pass (automated)         |
+| 41  | 16th seat, then 17th seat                                                                 | A                | 16th 201; 17th 409 `GROUP_FULL`                               | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-02): **26 tests, 4 files, all passing.**
+Latest run (local, 2026-11-09): **51 tests, 6 files, all passing.**
 
 ## Security review
 
@@ -514,6 +606,12 @@ when Prisma 6.x or ESLint ship patched releases.
 - Registration reveals whether an email is already registered (409). That's acceptable for a prototype; a production
   system would send a verification email instead.
 - No email verification or password reset yet. Ownership of the `@scu.edu` address is not verified.
+- **Invitations are matched by email, and email ownership isn't verified yet.** An invitation shows up for
+  whatever account registered with that address. Someone who registers an `@scu.edu` address they don't own
+  could see (and accept) invitations sent to it. Invite links with a one-time token (planned) or email
+  verification would fix this.
+- Invitations are in-app only: no email is sent, so the owner has to tell the person to log in or register.
+- A student can be invited to several groups for the same term, but can join only one (the others get 409 on accept).
 - TODO: add more as features land.
 
 ## Team contributions
@@ -522,9 +620,10 @@ when Prisma 6.x or ESLint ship patched releases.
 
 TODO: features built, PRs authored, PRs reviewed.
 
-### TODO: teammate name
+### Riley Conrad
 
-TODO: features built, PRs authored, PRs reviewed.
+- B1: roommate groups (schema and migration, service with row locking, routes, pages, tests, README).
+- TODO: PRs authored, PRs reviewed.
 
 ## AI usage
 
@@ -533,6 +632,9 @@ TODO: features built, PRs authored, PRs reviewed.
 - `CLAUDE.md` (and `AGENTS.md`, which points to it) gives every AI session the same rules: no secrets, login and
   authorization on every route, migrations only, plain JavaScript, small PRs.
 - `.claude/settings.json` denies the agent read access to `.env` and key files.
+- **B1 (roommate groups):** Riley wrote the requirements. Claude Code proposed a plan, and Riley approved it with
+  changes: lock the group row in leave/transfer/cancel, add the email-verification limitation, and comment the lock
+  order and the `(user_id, term)` backstop. Claude Code then wrote the code, tests, and README updates.
 - TODO: record later AI usage per feature (what was generated, what was changed by hand, and the AI security review).
 
 ## Roadmap
@@ -542,7 +644,7 @@ the application state machine, offers, and the cost calculator.
 
 | Member A                                                                       | Member B                                                                             |
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| A1. Admin: list pending landlords; approve or reject; promote to admin         | B1. Schema + service: roommate groups per term, invites, accept/decline, "ready"     |
+| A1. Admin: list pending landlords; approve or reject; promote to admin         | ✅ B1. Schema + service: roommate groups per term, invites, accept/decline, "ready"  |
 | A2. Properties, units, floor plans (CRUD with ownership + tests)               | B2. Cost calculator service + page (cents, rent split, on- vs. off-campus)           |
 | A3. Listing state machine + admin review queue with comments                   | B3. Application schema + state machine + `application_events`                        |
 | A4. GCS uploads (multer memory, type/size checks) for floor plans and photos   | B4. Landlord review actions: docs requested, under review, offer with deadline       |
