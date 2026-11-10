@@ -1,0 +1,113 @@
+<%- include('../partials/header', { title: detail.group.name }) %>
+<% const { group, viewer, members, pendingInvites, events } = detail; %>
+<% const isOwner = viewer.role === 'owner'; %>
+<p><a href="<%= viewer.role === 'admin' ? '/dashboard/admin' : '/groups' %>">← Back</a></p>
+<h1><%= group.name %> <span class="muted">· <%= group.term %></span></h1>
+<p>
+  Owner: <%= group.owner.email %> ·
+  <%= detail.seatsUsed %> / <%= detail.maxSeats %> seats ·
+  <% if (group.status === 'DISBANDED') { %><span class="badge">disbanded</span>
+  <% } else if (detail.ready) { %><span class="badge ready">ready</span>
+  <% } else { %><span class="badge">not ready</span><% } %>
+</p>
+
+<% if (errors._form) { %><p class="alert" role="alert"><%= errors._form %></p><% } %>
+
+<% if (viewer.role === 'invitee') { %>
+  <section class="card">
+    <p>You've been invited to join this group.</p>
+    <form method="post" action="/invites/<%= viewer.inviteId %>/accept" class="inline">
+      <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+      <button type="submit" class="btn small">Accept</button>
+    </form>
+    <form method="post" action="/invites/<%= viewer.inviteId %>/decline" class="inline">
+      <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+      <button type="submit" class="btn small secondary">Decline</button>
+    </form>
+  </section>
+<% } %>
+
+<section class="card">
+  <h2>Members (<%= members.length %>)</h2>
+  <ul class="rows">
+    <% members.forEach((m) => { %>
+      <li><span><%= m.email %> <% if (m.isOwner) { %><span class="badge">owner</span><% } %></span></li>
+    <% }) %>
+  </ul>
+</section>
+
+<% if (viewer.role !== 'invitee') { %>
+  <section class="card">
+    <h2>Pending invitations (<%= pendingInvites.length %>)</h2>
+    <% if (pendingInvites.length === 0) { %><p class="muted">None.</p><% } %>
+    <ul class="rows">
+      <% pendingInvites.forEach((p) => { %>
+        <li>
+          <span><%= p.email %></span>
+          <% if (isOwner) { %>
+            <form method="post" action="/groups/<%= group.id %>/invites/<%= p.id %>/cancel" class="inline">
+              <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+              <button type="submit" class="link">Cancel</button>
+            </form>
+          <% } %>
+        </li>
+      <% }) %>
+    </ul>
+
+    <% if (isOwner) { %>
+      <form method="post" action="/groups/<%= group.id %>/invites" novalidate>
+        <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+        <label for="email">Invite by email</label>
+        <input id="email" name="email" type="email" placeholder="name@scu.edu" required value="<%= values.email || '' %>">
+        <%- include('../partials/field-error', { field: 'email' }) %>
+        <button type="submit" class="btn">Send invitation</button>
+      </form>
+      <p class="muted">The person sees the invitation when they log in (or after they register with this email).</p>
+    <% } %>
+  </section>
+<% } %>
+
+<% if (isOwner && members.length > 1) { %>
+  <section class="card">
+    <h2>Transfer ownership</h2>
+    <form method="post" action="/groups/<%= group.id %>/transfer">
+      <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+      <label for="newOwnerId">New owner</label>
+      <select id="newOwnerId" name="newOwnerId">
+        <% members.filter((m) => !m.isOwner).forEach((m) => { %>
+          <option value="<%= m.userId %>"><%= m.email %></option>
+        <% }) %>
+      </select>
+      <%- include('../partials/field-error', { field: 'newOwnerId' }) %>
+      <button type="submit" class="btn">Transfer</button>
+    </form>
+  </section>
+<% } %>
+
+<% if (viewer.role === 'owner' || viewer.role === 'member') { %>
+  <section class="card">
+    <h2>Leave group</h2>
+    <% if (isOwner && members.length > 1) { %>
+      <p class="muted">Transfer ownership to another member before you leave.</p>
+    <% } else if (isOwner) { %>
+      <p class="muted">You're the only member, so leaving disbands the group and cancels pending invitations.</p>
+    <% } %>
+    <form method="post" action="/groups/<%= group.id %>/leave">
+      <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+      <button type="submit" class="btn secondary">Leave group</button>
+    </form>
+  </section>
+<% } %>
+
+<% if (viewer.role !== 'invitee') { %>
+  <section class="card">
+    <h2>History</h2>
+    <ol class="history">
+      <% events.forEach((e) => { %>
+        <li><time datetime="<%= e.createdAt.toISOString() %>"><%= e.createdAt.toISOString().slice(0, 16).replace('T', ' ') %> UTC</time>
+          · <%= e.summary %></li>
+      <% }) %>
+    </ol>
+  </section>
+<% } %>
+<%- include('../partials/footer') %>
