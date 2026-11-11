@@ -150,3 +150,65 @@ input[type='text'] {
   font-size: 0.85rem;
   padding: 2rem 1rem;
 }
+.card + .card {
+  margin-top: 1.25rem;
+}
+select {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #c9c4b8;
+  border-radius: 6px;
+  font: inherit;
+  background: #fff;
+}
+a.btn {
+  display: inline-block;
+  text-decoration: none;
+}
+.btn.small {
+  margin-top: 0;
+  padding: 0.3rem 0.8rem;
+}
+.btn.secondary {
+  background: #fff;
+  color: var(--pine);
+  border: 1px solid var(--pine);
+}
+.btn.secondary:hover {
+  background: var(--cream);
+}
+.rows {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.rows li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #ece6d9;
+}
+.rows .actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.badge {
+  display: inline-block;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  background: #ece6d9;
+  color: var(--ink);
+}
+.badge.ready {
+  background: var(--hay);
+}
+.history {
+  padding-left: 1.25rem;
+}
+.history time {
+  color: var(--muted);
+  font-size: 0.9rem;
+}

@@ -43,3 +43,13 @@ export async function logout(agent) {
   const redirect = await agent.get('/dashboard'); // → /dashboard/<role>
   return postForm(agent, '/logout', {}, { tokenFrom: redirect.headers.location });
 }
+
+/**
+ * POST as a JSON client (like a fetch() call): CSRF token in the
+ * `x-csrf-token` header, JSON body, JSON response. The token is read from any
+ * logged-in page (the header's logout form has one), `/groups` by default.
+ */
+export async function postJson(agent, path, body = {}, { tokenFrom = '/groups' } = {}) {
+  const token = await getCsrfToken(agent, tokenFrom);
+  return agent.post(path).set('x-csrf-token', token).set('Accept', 'application/json').send(body);
+}
