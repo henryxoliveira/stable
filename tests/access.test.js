@@ -11,16 +11,25 @@ beforeEach(resetDb);
 const SOME_ID = '00000000-0000-4000-8000-000000000000';
 
 describe('unauthenticated access', () => {
+  it('returns public health JSON without creating a session', async () => {
+    const res = await newAgent().get('/health');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+    expect(res.body).toEqual({ status: 'ok' });
+    expect(res.headers['set-cookie']).toBeUndefined();
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+  });
+
   it('allows only the public allow-list', async () => {
     const anon = newAgent();
-    expect((await anon.get('/healthz')).status).toBe(200);
+    expect((await anon.get('/health')).status).toBe(200);
     expect((await anon.get('/login')).status).toBe(200);
     expect((await anon.get('/register')).status).toBe(200);
     expect((await anon.get('/css/styles.css')).status).toBe(200);
   });
 
   it('redirects pages to /login (even unknown paths, so routes are not revealed)', async () => {
-    for (const path of ['/', '/dashboard', '/dashboard/admin', '/does-not-exist']) {
+    for (const path of ['/', '/dashboard', '/dashboard/admin', '/does-not-exist', '/healthz']) {
       const res = await newAgent().get(path);
       expect(res.status, path).toBe(302);
       expect(res.headers.location).toBe('/login');
