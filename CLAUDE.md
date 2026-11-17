@@ -12,7 +12,7 @@ The README is the only project documentation and gets graded. Keep it accurate.
 
 1. **Never commit secrets**, real credentials, `.env`, or service-account keys. Only `.env.example` (placeholders) is tracked.
 2. **Every route requires login** unless it is on the public allow-list: `/login`, `/register`,
-   static files, `/healthz`. Public routes live ONLY in `src/routes/public.routes.js`. Everything else is mounted after `requireLogin` in `src/app.js`.
+   static files, `/health`. Public routes live ONLY in `src/routes/public.routes.js`. Everything else is mounted after `requireLogin` in `src/app.js`.
 3. **Every data access goes through the authorization layer** (`src/middleware/auth.js` for roles/status,
    `src/middleware/authorize.js` for record ownership, plus query-level filters in services). Every new
    feature ships with a test proving an unauthorized user gets 403/404. Unapproved listings are

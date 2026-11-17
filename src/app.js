@@ -2,7 +2,7 @@
  * Builds the Express app (without listening, so tests can use it directly).
  *
  * ORDER MATTERS. Read top to bottom to see what every request goes through:
- *   security headers → static files → /healthz → body parsing → session →
+ *   security headers → static files → /health → body parsing → session →
  *   load user → CSRF → PUBLIC routes → requireLogin → protected routes → errors
  */
 import express from 'express';
@@ -32,7 +32,8 @@ export function createApp() {
 
   // --- Public, no session needed ---
   app.use(express.static(path.join(here, 'public'), { maxAge: '1h' }));
-  app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
+  // Avoid paths ending in z: Cloud Run reserves some of them.
+  app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
   // --- Parse input (small limits; file uploads will use multer separately) ---
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));

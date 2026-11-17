@@ -1,7 +1,7 @@
 /**
  * PUBLIC ROUTES: the complete allow-list of pages reachable without login.
  * Adding a route here is a security decision; it needs a reviewer's sign-off.
- * (Static assets and /healthz are mounted directly in app.js.)
+ * (Static assets and /health are mounted directly in app.js.)
  */
 import { Router } from 'express';
 import * as auth from '../controllers/auth.controller.js';
