@@ -4,6 +4,7 @@
  */
 import { Router } from 'express';
 import * as auth from '../controllers/auth.controller.js';
+import * as costs from '../controllers/costs.controller.js';
 import * as dashboard from '../controllers/dashboard.controller.js';
 import * as groups from '../controllers/groups.controller.js';
 import * as listings from '../controllers/listings.controller.js';
@@ -18,6 +19,7 @@ import {
   inviteSchema,
   transferSchema,
 } from '../validation/group.schemas.js';
+import { createEstimateSchema, estimateIdParams } from '../validation/cost.schemas.js';
 
 const router = Router();
 
@@ -93,5 +95,22 @@ router.post(
   validate(inviteIdParams, { source: 'params' }),
   groups.declineInvite,
 );
+
+// Cost calculator (B2). Students only (landlords and admins get 403). Each
+// student only ever sees their own estimates: the service filters by user id,
+// so anyone else's estimate is a 404.
+const estimateId = validate(estimateIdParams, { source: 'params' });
+
+router.get('/costs', student, costs.index);
+router.get('/api/costs', student, costs.apiIndex);
+router.post(
+  '/costs',
+  student,
+  validate(createEstimateSchema, { view: costs.createInvalid }),
+  costs.create,
+);
+router.get('/costs/:id', student, estimateId, costs.show);
+router.get('/api/costs/:id', student, estimateId, costs.apiShow);
+router.post('/costs/:id/delete', student, estimateId, costs.remove);
 
 export default router;

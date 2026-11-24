@@ -1,0 +1,63 @@
+<%- include('../partials/header', { title: estimate.name }) %>
+<% const r = estimate.result; const c = r.comparison; %>
+<p><a href="/costs">← All estimates</a></p>
+<h1><%= estimate.name %></h1>
+
+<section class="card">
+  <h2>Each month</h2>
+  <table class="breakdown">
+    <tr><th scope="row">Rent (whole unit)</th><td><%= formatCents(estimate.rentCents) %></td></tr>
+    <tr><th scope="row">Utilities</th><td><%= formatCents(estimate.utilitiesCents) %></td></tr>
+    <tr><th scope="row">Parking</th><td><%= formatCents(estimate.parkingCents) %></td></tr>
+    <tr class="total"><th scope="row">Total</th><td><%= formatCents(r.monthlyTotalCents) %></td></tr>
+  </table>
+
+  <h3>What each person pays per month (<%= estimate.people %> <%= estimate.people === 1 ? 'person' : 'people' %>)</h3>
+  <% if (r.sharesDiffer) { %>
+    <p class="muted">The total doesn't divide evenly, so the extra cents go one each to the first few people.</p>
+  <% } %>
+  <ol class="shares">
+    <% r.shares.forEach((share) => { %><li><%= formatCents(share) %></li><% }) %>
+  </ol>
+</section>
+
+<% if (c) { %>
+  <section class="card">
+    <h2>Off campus vs. on campus, per person</h2>
+    <table class="breakdown">
+      <tr>
+        <th scope="row">Off campus: <%= formatCents(r.maxMonthlyShareCents) %> × <%= estimate.leaseMonths %> months
+          <span class="muted">(the most anyone in the group pays)</span></th>
+        <td><%= formatCents(c.offCampusPerPersonCents) %></td>
+      </tr>
+      <tr>
+        <th scope="row">On campus: <%= formatCents(estimate.onCampusQuarterlyCents) %> × <%= estimate.quarters %> <%= estimate.quarters === 1 ? 'quarter' : 'quarters' %></th>
+        <td><%= formatCents(c.onCampusPerPersonCents) %></td>
+      </tr>
+    </table>
+    <p class="result">
+      <% if (c.cheaper === 'same') { %>Both cost the same.
+      <% } else { %><strong><%= c.cheaper === 'off_campus' ? 'Off campus' : 'On campus' %></strong> is cheaper by <%= formatCents(c.differenceCents) %> per person.<% } %>
+    </p>
+  </section>
+<% } %>
+
+<% if (estimate.linkedGroup) { %>
+  <section class="card">
+    <h2>Linked roommate group</h2>
+    <% if (estimate.linkedGroup.available) { %>
+      <p><a href="/groups/<%= estimate.linkedGroup.id %>"><%= estimate.linkedGroup.name %></a> ·
+        <%= estimate.linkedGroup.term %> · <%= estimate.linkedGroup.memberCount %> members now</p>
+    <% } else { %>
+      <p class="muted">Linked group no longer available.</p>
+    <% } %>
+  </section>
+<% } %>
+
+<section class="card">
+  <form method="post" action="/costs/<%= estimate.id %>/delete">
+    <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+    <button type="submit" class="btn secondary">Delete this estimate</button>
+  </form>
+</section>
+<%- include('../partials/footer') %>

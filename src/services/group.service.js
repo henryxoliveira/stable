@@ -25,9 +25,10 @@
  */
 import { prisma } from '../db/prisma.js';
 import { badRequest, conflict, forbidden, notFound } from '../utils/httpError.js';
+import { MAX_GROUP_SEATS } from '../config/limits.js';
 
-/** Seats = accepted members + pending invitations. */
-export const MAX_GROUP_SEATS = 16;
+/** Seats = accepted members + pending invitations (defined in config/limits.js). */
+export { MAX_GROUP_SEATS };
 
 /** SCU quarters in calendar order, with the month (0 = Jan) each one starts. */
 const QUARTERS = [
@@ -133,6 +134,22 @@ async function loadAccess(db, user, groupId) {
   if (invite) return { group, role: 'invitee', invite };
 
   throw notFound();
+}
+
+/**
+ * For other features (e.g. cost estimates): the student must be the owner or an
+ * accepted member of an ACTIVE group. Invitees, ex-members, strangers, and
+ * disbanded groups all get the same 404, so nothing about the group leaks.
+ * @param {{ id: string, email: string, role: string }} user  a STUDENT
+ * @param {string} groupId
+ * @returns {Promise<{ group: { id: string, name: string, term: string }, memberCount: number }>}
+ */
+export async function requireAcceptedMembership(user, groupId) {
+  const access = await loadAccess(prisma, user, groupId);
+  if (access.role !== 'owner' && access.role !== 'member') throw notFound();
+  const memberCount = await prisma.groupMember.count({ where: { groupId } });
+  const { id, name, term } = access.group;
+  return { group: { id, name, term }, memberCount };
 }
 
 function requireOwner(access, action) {
