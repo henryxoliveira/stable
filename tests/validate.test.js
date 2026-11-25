@@ -38,6 +38,15 @@ function buildApp() {
     handler,
   );
 
+  // A body schema whose keys share names with properties every object INHERITS
+  // ("toString", "constructor"). These must not be mistaken for earlier keys.
+  app.post(
+    '/inherited/:id',
+    params,
+    validate(z.object({ toString: z.string(), constructor: z.string() })),
+    handler,
+  );
+
   // An HTML form route whose `view` is a function (the hook groups use).
   app.post(
     '/form/:id',
@@ -95,6 +104,17 @@ describe('chained validate(): params then body', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(res.body.error.details).toEqual({ id: expect.stringMatching(/Conflicting values/) });
     expect(handled).toHaveLength(0);
+  });
+
+  it('keys named like inherited properties (toString, constructor) are not false conflicts', async () => {
+    const ok = await postJson(`/inherited/${ID}`, { toString: 'a', constructor: 'b' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.valid).toEqual({ id: ID, toString: 'a', constructor: 'b' });
+
+    // A real conflict (an own key with a different value) is still refused.
+    const conflict = await postJson(`/overlap/${ID}`, { id: OTHER_ID, name: 'Ok' });
+    expect(conflict.status).toBe(400);
+    expect(conflict.body.error.details).toEqual({ id: expect.stringMatching(/Conflicting/) });
   });
 
   it('allows a key declared by both schemas when the values match', async () => {
