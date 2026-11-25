@@ -112,7 +112,10 @@ only by group members, the listing owner, and admins. PENDING accounts can log i
 - **Roommate group:** per term. Invite by email, accept or decline. One active group per student per term.
   The group is "ready" when every member has accepted.
 - **Application:** `submitted → docs_requested → submitted → under_review → offered → accepted | declined | expired`.
-  `rejected` and `withdrawn` are also possible from open states. Group size ≤ unit capacity. One active application per group per unit.
+  The landlord can `reject` from submitted, docs_requested, or under_review. The group can `withdraw` from submitted,
+  docs_requested, or under_review; once `offered`, the group declines instead. The rules (states, moves, who may make
+  each move, deadline check) live in `src/services/application.workflow.js` and must match the README diagram.
+  Group size ≤ unit capacity. One active application per group per unit.
   Offers have a deadline: expire via check-on-read or a scheduled job, and the unit goes back to available.
   **Accept** = one transaction with `SELECT … FOR UPDATE` on the unit: mark it leased, close all other open
   applications for the unit (with notifications). Two groups can never hold the same unit.
