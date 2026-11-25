@@ -1,0 +1,75 @@
+<%- include('../partials/header', { title: 'Cost calculator' }) %>
+<h1>Cost calculator</h1>
+<p class="muted">Enter what a place costs each month. Stable splits it between your roommates, down to
+  the cent, and can compare it with living on campus. Your estimates are private to you.</p>
+
+<% if (errors._form) { %><p class="alert" role="alert"><%= errors._form %></p><% } %>
+
+<section class="card">
+  <h2>My estimates</h2>
+  <% if (estimates.length === 0) { %>
+    <p class="muted">No estimates yet. Make one below.</p>
+  <% } else { %>
+    <ul class="rows">
+      <% estimates.forEach((e) => { %>
+        <li>
+          <span><a href="/costs/<%= e.id %>"><%= e.name %></a> · <%= e.people %> <%= e.people === 1 ? 'person' : 'people' %></span>
+          <span><%= formatCents(e.result.monthlyTotalCents) %>/month ·
+            up to <%= formatCents(e.result.maxMonthlyShareCents) %> each</span>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+
+<section class="card">
+  <h2>New estimate</h2>
+  <p class="muted">Type dollar amounts like 1250, 1250.50, or $1,250.50. Use 0 if there is no cost.</p>
+  <form method="post" action="/costs" novalidate>
+    <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+
+    <label for="name">Name for this estimate</label>
+    <input id="name" name="name" type="text" maxlength="60" placeholder="e.g. 4-bedroom on Franklin St" required value="<%= values.name || '' %>">
+    <%- include('../partials/field-error', { field: 'name' }) %>
+
+    <label for="rent">Monthly rent (whole unit)</label>
+    <input id="rent" name="rent" type="text" inputmode="decimal" required value="<%= values.rent || '' %>">
+    <%- include('../partials/field-error', { field: 'rent' }) %>
+
+    <label for="utilities">Monthly utilities (whole unit: power, water, internet)</label>
+    <input id="utilities" name="utilities" type="text" inputmode="decimal" required value="<%= values.utilities || '' %>">
+    <%- include('../partials/field-error', { field: 'utilities' }) %>
+
+    <label for="parking">Monthly parking (whole unit)</label>
+    <input id="parking" name="parking" type="text" inputmode="decimal" required value="<%= values.parking || '' %>">
+    <%- include('../partials/field-error', { field: 'parking' }) %>
+
+    <label for="groupId">Roommate group (optional)</label>
+    <select id="groupId" name="groupId">
+      <option value="">No group</option>
+      <% groups.forEach((g) => { %>
+        <option value="<%= g.id %>" <%= values.groupId === g.id ? 'selected' : '' %>><%= g.name %> · <%= g.term %> (<%= g.memberCount %> <%= g.memberCount === 1 ? 'member' : 'members' %>)</option>
+      <% }) %>
+    </select>
+    <%- include('../partials/field-error', { field: 'groupId' }) %>
+
+    <label for="people">Number of people splitting the cost (leave blank to use your group's size)</label>
+    <input id="people" name="people" type="number" min="1" max="16" step="1" value="<%= values.people || '' %>">
+    <%- include('../partials/field-error', { field: 'people' }) %>
+
+    <label for="leaseMonths">Lease length in months</label>
+    <input id="leaseMonths" name="leaseMonths" type="number" min="1" max="24" step="1" value="<%= values.leaseMonths || '12' %>">
+    <%- include('../partials/field-error', { field: 'leaseMonths' }) %>
+
+    <label for="onCampusQuarterly">SCU housing cost per person, per quarter (optional, for comparison)</label>
+    <input id="onCampusQuarterly" name="onCampusQuarterly" type="text" inputmode="decimal" value="<%= values.onCampusQuarterly || '' %>">
+    <%- include('../partials/field-error', { field: 'onCampusQuarterly' }) %>
+
+    <label for="quarters">Quarters living on campus</label>
+    <input id="quarters" name="quarters" type="number" min="1" max="4" step="1" value="<%= values.quarters || '3' %>">
+    <%- include('../partials/field-error', { field: 'quarters' }) %>
+
+    <button type="submit" class="btn">Save estimate</button>
+  </form>
+</section>
+<%- include('../partials/footer') %>

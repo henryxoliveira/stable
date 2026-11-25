@@ -86,6 +86,7 @@ legend {
 }
 input[type='email'],
 input[type='password'],
+input[type='number'],
 input[type='text'] {
   width: 100%;
   padding: 0.55rem 0.7rem;
@@ -211,4 +212,33 @@ a.btn {
 .history time {
   color: var(--muted);
   font-size: 0.9rem;
+}
+h3 {
+  margin-top: 1.25rem;
+}
+.breakdown {
+  width: 100%;
+  border-collapse: collapse;
+}
+.breakdown th {
+  text-align: left;
+  font-weight: 400;
+  padding: 0.35rem 0;
+}
+.breakdown td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.breakdown tr + tr {
+  border-top: 1px solid #ece6d9;
+}
+.breakdown .total th,
+.breakdown .total td {
+  font-weight: 700;
+}
+.shares {
+  font-variant-numeric: tabular-nums;
+}
+.result {
+  font-size: 1.1rem;
 }
