@@ -41,7 +41,9 @@ export function fieldErrors(error) {
 export function conflictingKeys(earlier = {}, later = {}) {
   const out = {};
   for (const [key, value] of Object.entries(later)) {
-    if (key in earlier && JSON.stringify(earlier[key]) !== JSON.stringify(value)) {
+    // Object.hasOwn, not `in`: `in` also matches inherited names ('toString' in {} is true),
+    // which would turn a body field named "toString" into a false conflict.
+    if (Object.hasOwn(earlier, key) && JSON.stringify(earlier[key]) !== JSON.stringify(value)) {
       out[key] = `Conflicting values for "${key}" in the request.`;
     }
   }
