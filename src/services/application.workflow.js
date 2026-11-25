@@ -117,6 +117,9 @@ const describe = (state) => (state === null ? 'no application yet' : STATE_LABEL
 
 const refuse = (code, reason) => ({ allowed: false, code, reason });
 
+/** A real Date object holding a real time (not a string, not `new Date('nope')`). */
+const isValidDate = (value) => value instanceof Date && !Number.isNaN(value.getTime());
+
 export function isFinal(state) {
   return FINAL_STATES.includes(state);
 }
@@ -132,9 +135,7 @@ export function isOfferExpired(offerExpiresAt, now) {
     ['offerExpiresAt', offerExpiresAt],
     ['now', now],
   ]) {
-    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-      throw new TypeError(`${name} must be a valid Date.`);
-    }
+    if (!isValidDate(value)) throw new TypeError(`${name} must be a valid Date.`);
   }
   return now.getTime() >= offerExpiresAt.getTime();
 }
@@ -148,7 +149,8 @@ export function isOfferExpired(offerExpiresAt, now) {
  *   FINAL_STATE                     the application is finished
  *   ILLEGAL_TRANSITION              no such move in the workflow
  *   WRONG_ACTOR                     the move exists, but someone else must make it
- *   MISSING_DEADLINE                "accept" / "expire offer" called without { offerExpiresAt, now }
+ *   MISSING_DEADLINE                "accept" / "expire offer" without a valid { offerExpiresAt, now }
+ *                                   (missing, or not real Date objects, e.g. an ISO string from JSON)
  *   OFFER_EXPIRED                   accepting at or after the deadline
  *   OFFER_NOT_EXPIRED               expiring before the deadline
  * Later, the service maps WRONG_ACTOR to 403 and every other refusal to 409.
@@ -188,13 +190,15 @@ export function canTransition(from, to, actor, context) {
 
   if (DEADLINE_ACTIONS.has(move.action)) {
     const { offerExpiresAt, now } = context ?? {};
-    if (!offerExpiresAt || !now) {
+    // Refuse (never throw) when either date is missing OR not a real Date, e.g. an ISO
+    // string from a JSON body. A throw here would surface as a 500 instead of a 409.
+    if (!isValidDate(offerExpiresAt) || !isValidDate(now)) {
       return refuse(
         'MISSING_DEADLINE',
-        `To ${move.action}, the offer deadline and the current time must be checked.`,
+        `To ${ACTION_PHRASES[move.action]}, the offer deadline and the current time must both be valid dates.`,
       );
     }
-    const expired = isOfferExpired(offerExpiresAt, now);
+    const expired = isOfferExpired(offerExpiresAt, now); // safe: both checked above
     if (move.action === 'accept' && expired) {
       return refuse('OFFER_EXPIRED', 'This offer has expired, so it can no longer be accepted.');
     }

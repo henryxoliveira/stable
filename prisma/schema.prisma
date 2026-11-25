@@ -42,6 +42,7 @@ model User {
   groupMemberships GroupMember[]
   sentInvitations  GroupInvitation[]
   groupEvents      GroupEvent[]
+  costEstimates    CostEstimate[]
 
   @@map("users")
 }
@@ -97,10 +98,11 @@ model RoommateGroup {
   createdAt DateTime    @default(now()) @map("created_at")
   updatedAt DateTime    @updatedAt @map("updated_at")
 
-  owner       User              @relation(fields: [ownerId], references: [id])
-  members     GroupMember[]
-  invitations GroupInvitation[]
-  events      GroupEvent[]
+  owner         User              @relation(fields: [ownerId], references: [id])
+  members       GroupMember[]
+  invitations   GroupInvitation[]
+  events        GroupEvent[]
+  costEstimates CostEstimate[]
 
   @@index([term])
   @@map("roommate_groups")
@@ -158,4 +160,36 @@ model GroupEvent {
 
   @@index([groupId, createdAt])
   @@map("group_events")
+}
+
+// ---------------------------------------------------------------------------
+// Cost calculator (roadmap B2). Math lives in src/services/cost.service.js;
+// results are computed on every read, never stored.
+// ---------------------------------------------------------------------------
+
+/// A student's saved cost estimate. All money is integer cents.
+/// CHECK constraints (people 1–16, cents >= 0, lease_months 1–24, quarters 1–4)
+/// are added in the migration SQL, since Prisma's schema can't express them.
+model CostEstimate {
+  id                     String   @id @default(uuid()) @db.Uuid
+  userId                 String   @map("user_id") @db.Uuid
+  name                   String
+  people                 Int // 1–16, same limit as MAX_GROUP_SEATS
+  rentCents              Int      @map("rent_cents") // per month, whole unit
+  utilitiesCents         Int      @map("utilities_cents") // per month
+  parkingCents           Int      @map("parking_cents") // per month
+  leaseMonths            Int      @default(12) @map("lease_months")
+  onCampusQuarterlyCents Int?     @map("on_campus_quarterly_cents") // per person, per quarter
+  quarters               Int      @default(3)
+  groupId                String?  @map("group_id") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  /// A deleted user's estimates are deleted with them.
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// If a group row is ever deleted, the estimate just loses its link.
+  group RoommateGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("cost_estimates")
 }

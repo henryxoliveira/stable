@@ -223,6 +223,35 @@ describe('offer deadline', () => {
     }
   });
 
+  it.each([
+    [
+      'a string deadline (e.g. ISO text from JSON)',
+      { offerExpiresAt: DEADLINE.toISOString(), now: ms(-1) },
+    ],
+    ['an invalid Date', { offerExpiresAt: new Date('not a date'), now: ms(-1) }],
+    ['a missing "now"', { offerExpiresAt: DEADLINE }],
+    ['a string "now"', { offerExpiresAt: DEADLINE, now: '2027-03-01T16:00:00Z' }],
+  ])('%s → MISSING_DEADLINE with a plain-English reason, never a throw', (_, ctx) => {
+    let accept;
+    let expire;
+    expect(() => {
+      accept = canTransition('OFFERED', 'ACCEPTED', 'GROUP_MEMBER', ctx);
+      expire = canTransition('OFFERED', 'EXPIRED', 'SYSTEM', ctx);
+    }).not.toThrow();
+    expect(accept).toEqual({
+      allowed: false,
+      code: 'MISSING_DEADLINE',
+      reason:
+        'To accept an offer, the offer deadline and the current time must both be valid dates.',
+    });
+    expect(expire).toEqual({
+      allowed: false,
+      code: 'MISSING_DEADLINE',
+      reason:
+        'To expire an offer, the offer deadline and the current time must both be valid dates.',
+    });
+  });
+
   it('other moves from OFFERED do not need the deadline context', () => {
     expect(canTransition('OFFERED', 'DECLINED', 'GROUP_MEMBER').allowed).toBe(true);
     expect(canTransition('OFFERED', 'UNDER_REVIEW', 'LISTING_OWNER').allowed).toBe(true);

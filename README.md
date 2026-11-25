@@ -5,7 +5,7 @@
 A horse's home is its stable. The name is a nod to the SCU Broncos.
 
 - **Public URL:** TODO (Cloud Run URL after first deploy)
-- **Status:** authentication foundation and roommate groups are built. Other features are being built in PRs (see [Roadmap](#roadmap)).
+- **Status:** authentication, roommate groups, and the cost calculator are built. Other features are being built in PRs (see [Roadmap](#roadmap)).
 
 > Stable is a student class prototype. It is **not** affiliated with or endorsed by SCU Housing, does not
 > connect to any SCU system, and uses team-seeded listing data (nothing is scraped from Zillow,
@@ -73,7 +73,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Roommate groups per term (invite by email, accept, decline, transfer, leave, history) | ✅     |
 | Group application lifecycle, document requests, offers with deadlines                 | ⬜     |
 | Offer acceptance with row locking; competing applications auto-closed                 | ⬜     |
-| Cost calculator: per-person rent, utilities, and parking, on- vs. off-campus          | ⬜     |
+| Cost calculator: per-person rent, utilities, and parking, on- vs. off-campus          | ✅     |
 | Student subleases (same approval and application flow)                                | ⬜     |
 | In-app notifications                                                                  | ⬜     |
 | (Optional) AI lease summary                                                           | ⬜     |
@@ -89,16 +89,17 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 
 **Where this is enforced (server side, never only in the UI):**
 
-| Check                                    | Code                                                                                           |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Logged in at all                         | `requireLogin` in `src/middleware/auth.js`, mounted globally in `src/app.js`                   |
-| Has the right role                       | `requireRole('LANDLORD', …)` in `src/middleware/auth.js`                                       |
-| Account approved (not PENDING)           | `requireActiveAccount` in `src/middleware/auth.js`                                             |
-| Owns this specific record                | `assertOwnership` / `loadOwned` in `src/middleware/authorize.js`                               |
-| Can't self-register as admin             | zod enum in `src/validation/auth.schemas.js` **and** a guard in `src/services/auth.service.js` |
-| Unapproved listings hidden from students | Prisma `where` filter in the listing service (TODO)                                            |
-| Group page/actions: member or invitee    | `loadAccess()` in `src/services/group.service.js` (404 for anyone else; admins may view)       |
-| Group owner-only actions                 | `requireOwner()` in `src/services/group.service.js` (403 for members and invitees)             |
+| Check                                    | Code                                                                                            |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Logged in at all                         | `requireLogin` in `src/middleware/auth.js`, mounted globally in `src/app.js`                    |
+| Has the right role                       | `requireRole('LANDLORD', …)` in `src/middleware/auth.js`                                        |
+| Account approved (not PENDING)           | `requireActiveAccount` in `src/middleware/auth.js`                                              |
+| Owns this specific record                | `assertOwnership` / `loadOwned` in `src/middleware/authorize.js`                                |
+| Can't self-register as admin             | zod enum in `src/validation/auth.schemas.js` **and** a guard in `src/services/auth.service.js`  |
+| Unapproved listings hidden from students | Prisma `where` filter in the listing service (TODO)                                             |
+| Group page/actions: member or invitee    | `loadAccess()` in `src/services/group.service.js` (404 for anyone else; admins may view)        |
+| Group owner-only actions                 | `requireOwner()` in `src/services/group.service.js` (403 for members and invitees)              |
+| Cost estimate: only its owner            | every query in `src/services/costEstimate.service.js` filters by `userId` (404 for anyone else) |
 
 ## Record ownership rules
 
@@ -229,7 +230,7 @@ next B3 PR.
 - Finished applications (accepted, declined, expired, rejected, withdrawn) can't change any more.
 - Once an offer is made, the group can accept or decline, but not withdraw.
 - **Deadline:** an offer counts as expired at the exact deadline time. Accepting needs the deadline and the
-  current time to be checked; if they aren't passed in, the move is refused, so later code can't skip the check.
+  current time to be checked; if they are missing or not valid dates, the move is refused, so later code can't skip the check.
 - A test reads the diagram above and checks that the code allows exactly the same moves. If you change the
   diagram, the test fails until the code matches (and the other way round).
 
@@ -249,6 +250,31 @@ Rules:
 The admin opens a selection window, and students get time slots by priority (class year, then a random
 lottery). During their slot, a student claims a bed, with locking to prevent double booking. _Not
 planned unless time allows._
+
+### Cost calculator
+
+A student types in what a place costs each month: rent, utilities, and parking for the whole unit.
+Stable shows what each roommate pays. The student can save several estimates and compare them.
+Each estimate is private to the student who made it.
+
+- **Money is kept in cents.** "$4,000.50" is stored as 400050. Computers make small rounding errors with
+  decimals, so we never use them for money.
+- **Typing amounts.** You can type 1250, 1250.50, $1,250, or $1,250.50. Negative amounts, more than two
+  digits of cents, letters, and amounts over $100,000 are refused with a plain message.
+- **Splitting.** The monthly total is divided by the number of people. If it doesn't divide evenly, the
+  extra cents go one each to the first few people. Example: $4,000.00 for 3 people is $1,333.34, $1,333.33,
+  and $1,333.33. The shares always add up to the exact total.
+- **On campus vs. off campus.** If the student enters an SCU housing cost per quarter, Stable compares the
+  total for the lease against the total for the quarters on campus. Off campus is the most anyone in the group
+  pays each month, times the lease length (12 months by default). On campus is the quarterly cost times the
+  number of quarters (3 by default, about 9 months). These can cover different lengths of time, for example a
+  12-month lease includes summer, so the page shows both totals and how each one was worked out.
+- **Roommate group (optional).** A student can link one of their groups. If they leave "people" blank, it
+  uses the group's size. Only accepted members can link a group. If the student later leaves the group,
+  the estimate says "Linked group no longer available" and hides the group's details.
+- **Results are worked out fresh** every time an estimate is opened. Only the inputs are saved.
+- Code: the math is in `src/services/cost.service.js` (no database, so it is easy to test). Saving and
+  loading is in `src/services/costEstimate.service.js`.
 
 ## How the system starts
 
@@ -357,7 +383,7 @@ the group. An offer stores `offerExpiresAt`.
 
 ## Data model
 
-**Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init` and `20261110030323_roommate_groups`):
+**Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init`, `20261110030323_roommate_groups`, and `20261124073118_cost_estimates`):
 
 | Table     | Columns                                                                                                                                                                 | Notes                        |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
@@ -379,6 +405,25 @@ erDiagram
     roommate_groups ||--o{ group_invitations : "invites (by email)"
     roommate_groups ||--o{ group_events : "audit log"
     users ||--o{ group_events : "actor"
+```
+
+| Table            | Columns                                                                                                                                                                                                                                                                             | Notes                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `cost_estimates` | `id`, `user_id` → users, `name`, `people`, `rent_cents`, `utilities_cents`, `parking_cents` (monthly, whole unit), `lease_months` (default 12), `on_campus_quarterly_cents` (optional), `quarters` (default 3), `group_id` → roommate_groups (optional), `created_at`, `updated_at` | One student's saved estimate. Money is whole cents. Results are not stored; they are worked out on each view. |
+
+How `cost_estimates` protects its data:
+
+- If a user is deleted, their estimates are deleted too.
+- If a group row is ever deleted, the estimate keeps its numbers and just loses the link.
+- The database itself refuses bad numbers, even if the app had a bug: people must be 1 to 16, money can't be
+  negative, the lease must be 1 to 24 months, and quarters must be 1 to 4. (These are CHECK constraints in the
+  migration.)
+- The money column names match the planned `units` table, so a listing's costs can fill in an estimate later.
+
+```mermaid
+erDiagram
+    users ||--o{ cost_estimates : saves
+    roommate_groups |o--o{ cost_estimates : "linked to (optional)"
 ```
 
 **Planned** (each one will arrive in a migration in the PR that needs it):
@@ -547,62 +592,83 @@ there, and record the result in [Test scenarios](#test-scenarios-and-results).
 Automated tests: `npm test` (Vitest + Supertest, real Postgres). Each Supertest agent is a separate
 browser with its own cookies.
 
-| #   | Scenario                                                                                  | Accounts used    | Expected                                                      | Actual                      |
-| --- | ----------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------- | --------------------------- |
-| 1   | Register a student with an `@scu.edu` email                                               | new student      | 302 → dashboard, ACTIVE, argon2id hash, `/api/me` has no hash | ✅ pass (automated)         |
-| 2   | Register a student with `gmail.com`, `scu.edu.evil.com`, or `notscu.edu`                  | 3 anonymous      | 400, no user created                                          | ✅ pass (automated)         |
-| 3   | Public registration with `role=ADMIN`                                                     | anonymous        | 400, no admin created                                         | ✅ pass (automated)         |
-| 4   | Register a landlord                                                                       | new landlord     | PENDING                                                       | ✅ pass (automated)         |
-| 5   | Missing fields, short password, duplicate email                                           | anonymous        | 400 / 400 / 409                                               | ✅ pass (automated)         |
-| 6   | Form POST without a CSRF token                                                            | anonymous        | 403                                                           | ✅ pass (automated)         |
-| 7   | Login changes the session id; cookie is HttpOnly and SameSite=Lax                         | student          | new sid                                                       | ✅ pass (automated)         |
-| 8   | Wrong password and unknown email                                                          | anonymous        | same 401 message                                              | ✅ pass (automated)         |
-| 9   | Logout, then replay the old cookie from another client                                    | student          | session row deleted; 401                                      | ✅ pass (automated)         |
-| 10  | Suspended user                                                                            | student          | existing session 401; login 401                               | ✅ pass (automated)         |
-| 11  | Anonymous access to `/`, `/dashboard`, `/dashboard/admin`, an unknown path                | anonymous        | 302 → `/login`                                                | ✅ pass (automated)         |
-| 12  | Anonymous `GET /api/me`                                                                   | anonymous        | 401 `{ error: { code, message } }`                            | ✅ pass (automated)         |
-| 13  | Student opens the admin or landlord dashboard                                             | student          | 403                                                           | ✅ pass (automated)         |
-| 14  | Pending landlord submits a listing                                                        | pending landlord | 403 `ACCOUNT_PENDING`                                         | ✅ pass (automated)         |
-| 15  | Active landlord submits (feature stub)                                                    | active landlord  | passes checks → 501                                           | ✅ pass (automated)         |
-| 16  | Invalid route param                                                                       | active landlord  | 400 `VALIDATION_ERROR`                                        | ✅ pass (automated)         |
-| 17  | Ownership helper: owner, admin, other landlord                                            | unit test        | allow, allow, 404                                             | ✅ pass (automated)         |
-| 18  | `seed:admin` twice, then with an existing non-admin email                                 | script           | created → exists (hash unchanged) → conflict (not promoted)   | ✅ pass (automated)         |
-| 19  | Student A applies, Landlord reviews, Student C (not in the group) reads the application   | A, L, C          | C gets 404                                                    | TODO                        |
-| 20  | Two groups accept offers for the same unit at the same time                               | groups 1 and 2   | exactly one is accepted                                       | TODO                        |
-| 21  | Offer past its deadline                                                                   | group, landlord  | `expired`, unit available                                     | TODO                        |
-| 22  | Cost split: $4,000 rent + $200 utilities, 3 people                                        | unit test        | per-person amount and remainder handled                       | TODO                        |
-| 23  | Data still present after a redeploy (account, listing, uploaded floor plan)               | any              | all present                                                   | TODO (manual, on Cloud Run) |
-| 24  | Create group (form) → invite 2 → both accept                                              | A, B, C          | not ready while pending; ready after; 5 audit events          | ✅ pass (automated)         |
-| 25  | Invite an email before that person registers; they register and accept                    | A, D             | invite appears right after registering; D becomes a member    | ✅ pass (automated)         |
-| 26  | Invite a registered vs. an unregistered email                                             | A                | identical status and response shape                           | ✅ pass (automated)         |
-| 27  | Decline, then the owner re-invites                                                        | A, B             | B accepts; still one invitation row                           | ✅ pass (automated)         |
-| 28  | Owner cancels an invite; invitee then tries to accept                                     | A, B             | invite gone; accept 404; second cancel 409                    | ✅ pass (automated)         |
-| 29  | Transfer ownership, then the old owner leaves                                             | A, B             | B owns; A gets 404 on the group                               | ✅ pass (automated)         |
-| 30  | Owner leaves while other members remain                                                   | A, B             | 409 `TRANSFER_OWNERSHIP_FIRST`                                | ✅ pass (automated)         |
-| 31  | Transfer to a non-member or to yourself                                                   | A                | 400                                                           | ✅ pass (automated)         |
-| 32  | Sole owner leaves                                                                         | A, B (invited)   | DISBANDED, invite CANCELLED, `DISBANDED` event                | ✅ pass (automated)         |
-| 33  | Join a second group for the same term (accept, then create)                               | A, B, C          | 409 `ALREADY_IN_GROUP_FOR_TERM`; another term works           | ✅ pass (automated)         |
-| 34  | Two simultaneous accepts for the same term                                                | B                | exactly one 200, one 409; one membership row                  | ✅ pass (automated)         |
-| 35  | Stranger opens the group or tries any action                                              | S                | 404 everywhere; no events written                             | ✅ pass (automated)         |
-| 36  | Non-owner member or invitee invites, cancels, or transfers                                | B, C             | 403; invitee doesn't see pending emails or history            | ✅ pass (automated)         |
-| 37  | Landlord uses group routes; admin views a group                                           | L, admin         | landlord 403; admin 200 to view, 403 to act                   | ✅ pass (automated)         |
-| 38  | Malformed term or empty name (JSON and HTML form)                                         | A                | 400 with field errors; form re-rendered; no group created     | ✅ pass (automated)         |
-| 42  | Past term (`FALL-2025`) or a term past the 6-quarter window                               | A                | 400 "Choose one of the upcoming terms"                        | ✅ pass (automated)         |
-| 43  | Create form term dropdown                                                                 | A                | options = `upcomingTerms()`, labels like "Fall 2026"          | ✅ pass (automated)         |
-| 44  | `upcomingTerms()` on fixed dates (Nov 9 2026, Jan 15 2027, quarter edges, Dec 31 Pacific) | unit test        | current quarter + next 5, year rolls over after FALL          | ✅ pass (automated)         |
-| 39  | Malformed uuid in a route                                                                 | A                | 400                                                           | ✅ pass (automated)         |
-| 40  | Non-`@scu.edu` invite, self-invite, duplicate invite                                      | A                | 400 / 400 / 409 `INVITE_EXISTS`                               | ✅ pass (automated)         |
-| 41  | 16th seat, then 17th seat                                                                 | A                | 16th 201; 17th 409 `GROUP_FULL`                               | ✅ pass (automated)         |
-| 66  | Application rules match the Workflow C diagram (the test reads the diagram)               | unit test        | exactly the diagram's moves, each by the same actor           | ✅ pass (automated)         |
-| 67  | Every allowed application move, made by the right person                                  | unit test        | allowed                                                       | ✅ pass (automated)         |
-| 68  | Moves the diagram doesn't allow (e.g. submitted → offered, offered → withdrawn)           | unit test        | refused: "can't go from … to …"                               | ✅ pass (automated)         |
-| 69  | Each move made by the wrong person (e.g. a group member making an offer)                  | unit test        | refused, naming who can make that move                        | ✅ pass (automated)         |
-| 70  | Any move out of a finished application (accepted, declined, expired, rejected, withdrawn) | unit test        | refused: it can't change any more                             | ✅ pass (automated)         |
-| 71  | Offer deadline: 1 ms before, exactly at, and 1 ms after                                   | unit test        | accept works only before it; at the deadline it's expired     | ✅ pass (automated)         |
-| 72  | Accept or expire an offer without passing the deadline                                    | unit test        | refused (`MISSING_DEADLINE`), so the check can't be skipped   | ✅ pass (automated)         |
-| 73  | Group size vs. unit: equal, one too many, beds vs. bedrooms, 1 and 16 people, bad sizes   | unit test        | fits only when size ≤ beds (or bedrooms if no beds)           | ✅ pass (automated)         |
+| #   | Scenario                                                                                                      | Accounts used    | Expected                                                                                                                            | Actual                      |
+| --- | ------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| 1   | Register a student with an `@scu.edu` email                                                                   | new student      | 302 → dashboard, ACTIVE, argon2id hash, `/api/me` has no hash                                                                       | ✅ pass (automated)         |
+| 2   | Register a student with `gmail.com`, `scu.edu.evil.com`, or `notscu.edu`                                      | 3 anonymous      | 400, no user created                                                                                                                | ✅ pass (automated)         |
+| 3   | Public registration with `role=ADMIN`                                                                         | anonymous        | 400, no admin created                                                                                                               | ✅ pass (automated)         |
+| 4   | Register a landlord                                                                                           | new landlord     | PENDING                                                                                                                             | ✅ pass (automated)         |
+| 5   | Missing fields, short password, duplicate email                                                               | anonymous        | 400 / 400 / 409                                                                                                                     | ✅ pass (automated)         |
+| 6   | Form POST without a CSRF token                                                                                | anonymous        | 403                                                                                                                                 | ✅ pass (automated)         |
+| 7   | Login changes the session id; cookie is HttpOnly and SameSite=Lax                                             | student          | new sid                                                                                                                             | ✅ pass (automated)         |
+| 8   | Wrong password and unknown email                                                                              | anonymous        | same 401 message                                                                                                                    | ✅ pass (automated)         |
+| 9   | Logout, then replay the old cookie from another client                                                        | student          | session row deleted; 401                                                                                                            | ✅ pass (automated)         |
+| 10  | Suspended user                                                                                                | student          | existing session 401; login 401                                                                                                     | ✅ pass (automated)         |
+| 11  | Anonymous access to `/`, `/dashboard`, `/dashboard/admin`, an unknown path                                    | anonymous        | 302 → `/login`                                                                                                                      | ✅ pass (automated)         |
+| 12  | Anonymous `GET /api/me`                                                                                       | anonymous        | 401 `{ error: { code, message } }`                                                                                                  | ✅ pass (automated)         |
+| 13  | Student opens the admin or landlord dashboard                                                                 | student          | 403                                                                                                                                 | ✅ pass (automated)         |
+| 14  | Pending landlord submits a listing                                                                            | pending landlord | 403 `ACCOUNT_PENDING`                                                                                                               | ✅ pass (automated)         |
+| 15  | Active landlord submits (feature stub)                                                                        | active landlord  | passes checks → 501                                                                                                                 | ✅ pass (automated)         |
+| 16  | Invalid route param                                                                                           | active landlord  | 400 `VALIDATION_ERROR`                                                                                                              | ✅ pass (automated)         |
+| 17  | Ownership helper: owner, admin, other landlord                                                                | unit test        | allow, allow, 404                                                                                                                   | ✅ pass (automated)         |
+| 18  | `seed:admin` twice, then with an existing non-admin email                                                     | script           | created → exists (hash unchanged) → conflict (not promoted)                                                                         | ✅ pass (automated)         |
+| 19  | Student A applies, Landlord reviews, Student C (not in the group) reads the application                       | A, L, C          | C gets 404                                                                                                                          | TODO                        |
+| 20  | Two groups accept offers for the same unit at the same time                                                   | groups 1 and 2   | exactly one is accepted                                                                                                             | TODO                        |
+| 21  | Offer past its deadline                                                                                       | group, landlord  | `expired`, unit available                                                                                                           | TODO                        |
+| 22  | Cost split: $4,000 rent + $200 utilities, 3 people                                                            | unit test        | $1,400.00 each; shares are equal                                                                                                    | ✅ pass (automated)         |
+| 23  | Data still present after a redeploy (account, listing, uploaded floor plan)                                   | any              | all present                                                                                                                         | TODO (manual, on Cloud Run) |
+| 24  | Create group (form) → invite 2 → both accept                                                                  | A, B, C          | not ready while pending; ready after; 5 audit events                                                                                | ✅ pass (automated)         |
+| 25  | Invite an email before that person registers; they register and accept                                        | A, D             | invite appears right after registering; D becomes a member                                                                          | ✅ pass (automated)         |
+| 26  | Invite a registered vs. an unregistered email                                                                 | A                | identical status and response shape                                                                                                 | ✅ pass (automated)         |
+| 27  | Decline, then the owner re-invites                                                                            | A, B             | B accepts; still one invitation row                                                                                                 | ✅ pass (automated)         |
+| 28  | Owner cancels an invite; invitee then tries to accept                                                         | A, B             | invite gone; accept 404; second cancel 409                                                                                          | ✅ pass (automated)         |
+| 29  | Transfer ownership, then the old owner leaves                                                                 | A, B             | B owns; A gets 404 on the group                                                                                                     | ✅ pass (automated)         |
+| 30  | Owner leaves while other members remain                                                                       | A, B             | 409 `TRANSFER_OWNERSHIP_FIRST`                                                                                                      | ✅ pass (automated)         |
+| 31  | Transfer to a non-member or to yourself                                                                       | A                | 400                                                                                                                                 | ✅ pass (automated)         |
+| 32  | Sole owner leaves                                                                                             | A, B (invited)   | DISBANDED, invite CANCELLED, `DISBANDED` event                                                                                      | ✅ pass (automated)         |
+| 33  | Join a second group for the same term (accept, then create)                                                   | A, B, C          | 409 `ALREADY_IN_GROUP_FOR_TERM`; another term works                                                                                 | ✅ pass (automated)         |
+| 34  | Two simultaneous accepts for the same term                                                                    | B                | exactly one 200, one 409; one membership row                                                                                        | ✅ pass (automated)         |
+| 35  | Stranger opens the group or tries any action                                                                  | S                | 404 everywhere; no events written                                                                                                   | ✅ pass (automated)         |
+| 36  | Non-owner member or invitee invites, cancels, or transfers                                                    | B, C             | 403; invitee doesn't see pending emails or history                                                                                  | ✅ pass (automated)         |
+| 37  | Landlord uses group routes; admin views a group                                                               | L, admin         | landlord 403; admin 200 to view, 403 to act                                                                                         | ✅ pass (automated)         |
+| 38  | Malformed term or empty name (JSON and HTML form)                                                             | A                | 400 with field errors; form re-rendered; no group created                                                                           | ✅ pass (automated)         |
+| 39  | Malformed uuid in a route                                                                                     | A                | 400                                                                                                                                 | ✅ pass (automated)         |
+| 40  | Non-`@scu.edu` invite, self-invite, duplicate invite                                                          | A                | 400 / 400 / 409 `INVITE_EXISTS`                                                                                                     | ✅ pass (automated)         |
+| 41  | 16th seat, then 17th seat                                                                                     | A                | 16th 201; 17th 409 `GROUP_FULL`                                                                                                     | ✅ pass (automated)         |
+| 42  | Past term (`FALL-2025`) or a term past the 6-quarter window                                                   | A                | 400 "Choose one of the upcoming terms"                                                                                              | ✅ pass (automated)         |
+| 43  | Create form term dropdown                                                                                     | A                | options = `upcomingTerms()`, labels like "Fall 2026"                                                                                | ✅ pass (automated)         |
+| 44  | `upcomingTerms()` on fixed dates (Nov 9 2026, Jan 15 2027, quarter edges, Dec 31 Pacific)                     | unit test        | current quarter + next 5, year rolls over after FALL                                                                                | ✅ pass (automated)         |
+| 45  | Ben accepts, then the owner cancels the same invite                                                           | A, B             | cancel 409 `INVITE_NOT_PENDING`; Ben stays a member                                                                                 | ✅ pass (automated)         |
+| 46  | Sole owner disbands, then the invitee accepts with the old invite id                                          | A, B             | 404; no membership; no `INVITE_ACCEPTED` event                                                                                      | ✅ pass (automated)         |
+| 47  | Race ×10: accept vs. owner cancel, sent at the same time (`Promise.all`)                                      | A, B             | accept-first: 1 membership, cancel 409; cancel-first: accept 404, no membership or `INVITE_ACCEPTED`; never a `PENDING` invite left | ✅ pass (automated)         |
+| 48  | Race ×10: accept vs. sole owner leaving (disband)                                                             | A, B             | accept-first: leave 409 `TRANSFER_OWNERSHIP_FIRST`, group ACTIVE; disband-first: accept 404, DISBANDED, no membership               | ✅ pass (automated)         |
+| 49  | Chained `validate()` (params, then body): both pass, second fails, first fails, unknown keys, function `view` | unit test        | merged `req.valid`; 400 with only the failing validator's fields; handler never runs; unknown keys dropped                          | ✅ pass (automated)         |
+| 50  | Two chained schemas declare the same key (`params.id` vs. `body.id`)                                          | unit test        | different values: 400 `VALIDATION_ERROR`, no overwrite; same value: allowed                                                         | ✅ pass (automated)         |
+| 51  | Uneven split: $4,000.00 for 3 people                                                                          | unit test        | $1,333.34 + $1,333.33 + $1,333.33; adds up to $4,000.00                                                                             | ✅ pass (automated)         |
+| 52  | Split for 1 person and for 16 people                                                                          | unit test        | 1 person pays all; 16 shares add up exactly, differ by ≤ 1¢                                                                         | ✅ pass (automated)         |
+| 53  | Typing amounts: 4000, 4000.5, $4,000.50, 4,000 are accepted                                                   | unit test        | correct cents (e.g. 400050)                                                                                                         | ✅ pass (automated)         |
+| 54  | Typing amounts: negative, 3 decimals, letters, empty, "4,00", "1.2.3", over $100,000                          | unit test        | refused with a plain-English message                                                                                                | ✅ pass (automated)         |
+| 55  | On- vs. off-campus comparison (off cheaper, on cheaper, same, none entered)                                   | unit test        | right totals and the cheaper option                                                                                                 | ✅ pass (automated)         |
+| 56  | Save an estimate with the form, then open it                                                                  | student          | page shows $4,200.00 a month and $1,400.00 each                                                                                     | ✅ pass (automated)         |
+| 57  | Bad form input (every field)                                                                                  | student          | 400; form shown again with a message per field; nothing saved                                                                       | ✅ pass (automated)         |
+| 58  | Another student opens or deletes my estimate                                                                  | A, S             | 404 (same as a missing estimate); estimate still there                                                                              | ✅ pass (automated)         |
+| 59  | Landlord uses cost pages; logged-out visitor opens them                                                       | L, anonymous     | landlord 403; visitor sent to `/login` (API: 401)                                                                                   | ✅ pass (automated)         |
+| 60  | Link a group and leave "people" blank                                                                         | A, B             | people = group size (2)                                                                                                             | ✅ pass (automated)         |
+| 61  | Link a group I'm not in, or am only invited to                                                                | S, C             | 404; nothing saved                                                                                                                  | ✅ pass (automated)         |
+| 62  | Link a group, leave it, then open the estimate                                                                | B                | "Linked group no longer available"; no group details shown                                                                          | ✅ pass (automated)         |
+| 63  | Insert bad rows straight into the database (people 0 or 17, negative money, etc.)                             | unit test        | database refuses every one                                                                                                          | ✅ pass (automated)         |
+| 64  | Save an estimate, then read it from a brand-new app instance                                                  | student          | same estimate and results (data lives in Postgres)                                                                                  | ✅ pass (automated)         |
+| 65  | Delete my own estimate                                                                                        | student          | gone; opening it again gives 404                                                                                                    | ✅ pass (automated)         |
+| 66  | Application rules match the Workflow C diagram (the test reads the diagram)                                   | unit test        | exactly the diagram's moves, each by the same actor                                                                                 | ✅ pass (automated)         |
+| 67  | Every allowed application move, made by the right person                                                      | unit test        | allowed                                                                                                                             | ✅ pass (automated)         |
+| 68  | Moves the diagram doesn't allow (e.g. submitted → offered, offered → withdrawn)                               | unit test        | refused: "can't go from … to …"                                                                                                     | ✅ pass (automated)         |
+| 69  | Each move made by the wrong person (e.g. a group member making an offer)                                      | unit test        | refused, naming who can make that move                                                                                              | ✅ pass (automated)         |
+| 70  | Any move out of a finished application (accepted, declined, expired, rejected, withdrawn)                     | unit test        | refused: it can't change any more                                                                                                   | ✅ pass (automated)         |
+| 71  | Offer deadline: 1 ms before, exactly at, and 1 ms after                                                       | unit test        | accept works only before it; at the deadline it's expired                                                                           | ✅ pass (automated)         |
+| 72  | Accept or expire an offer without passing the deadline                                                        | unit test        | refused (`MISSING_DEADLINE`), so the check can't be skipped                                                                         | ✅ pass (automated)         |
+| 73  | Group size vs. unit: equal, one too many, beds vs. bedrooms, 1 and 16 people, bad sizes                       | unit test        | fits only when size ≤ beds (or bedrooms if no beds)                                                                                 | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-09): **51 tests, 6 files, all passing.**
+Latest run (local, 2026-11-24): **212 tests, 10 files, all passing.**
 
 ## Security review
 
@@ -648,6 +714,8 @@ TODO: features built, PRs authored, PRs reviewed.
 ### Riley Conrad
 
 - B1: roommate groups (schema and migration, service with row locking, routes, pages, tests, README).
+- B2: cost calculator (pure math service in cents, strict dollar parser, saved estimates with an optional group
+  link, database CHECK constraints, pages, tests, README).
 - TODO: PRs authored, PRs reviewed.
 
 ## AI usage
@@ -660,6 +728,10 @@ TODO: features built, PRs authored, PRs reviewed.
 - **B1 (roommate groups):** Riley wrote the requirements. Claude Code proposed a plan, and Riley approved it with
   changes: lock the group row in leave/transfer/cancel, add the email-verification limitation, and comment the lock
   order and the `(user_id, term)` backstop. Claude Code then wrote the code, tests, and README updates.
+- **B2 (cost calculator):** Riley wrote the requirements. Claude Code proposed a plan. Riley approved it and
+  added changes: accept "$" and thousands commas, plain-English error messages, CHECK constraints in the database,
+  cascade delete for a user's estimates, and hiding a linked group's details after the student leaves it. Claude
+  Code then wrote the code, tests, and README updates.
 - TODO: record later AI usage per feature (what was generated, what was changed by hand, and the AI security review).
 
 ## Roadmap
@@ -670,7 +742,7 @@ the application state machine, offers, and the cost calculator.
 | Member A                                                                       | Member B                                                                             |
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | A1. Admin: list pending landlords; approve or reject; promote to admin         | ✅ B1. Schema + service: roommate groups per term, invites, accept/decline, "ready"  |
-| A2. Properties, units, floor plans (CRUD with ownership + tests)               | B2. Cost calculator service + page (cents, rent split, on- vs. off-campus)           |
+| A2. Properties, units, floor plans (CRUD with ownership + tests)               | ✅ B2. Cost calculator service + page (cents, rent split, on- vs. off-campus)        |
 | A3. Listing state machine + admin review queue with comments                   | B3. Application schema + state machine + `application_events`                        |
 | A4. GCS uploads (multer memory, type/size checks) for floor plans and photos   | B4. Landlord review actions: docs requested, under review, offer with deadline       |
 | A5. Map page (Leaflet, vendored) + JSON endpoint + haversine and price filters | B5. Accept offer with a transaction and `FOR UPDATE`; auto-close competitors; expiry |
