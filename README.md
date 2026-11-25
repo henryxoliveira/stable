@@ -205,6 +205,7 @@ stateDiagram-v2
     offered --> expired: deadline passes (unit back to available)
     offered --> under_review: landlord rescinds offer
     submitted --> rejected: landlord rejects
+    docs_requested --> rejected: landlord rejects
     under_review --> rejected: landlord rejects
     submitted --> withdrawn: group withdraws
     docs_requested --> withdrawn: group withdraws
@@ -216,9 +217,25 @@ stateDiagram-v2
     withdrawn --> [*]
 ```
 
+**Where these rules live.** The states, the allowed moves, and who may make each move are written down in one
+file: `src/services/application.workflow.js`. It has no database and doesn't read the clock (the current time is
+passed in), so every rule can be tested on its own. The database, pages, and buttons will use this file in the
+next B3 PR.
+
+- In the code, states are written in capitals (`DOCS_REQUESTED`). The diagram above uses lowercase to stay readable.
+  Pages show friendly names such as "Documents requested".
+- Each move has exactly one kind of actor: a **group member**, the **listing owner** (landlord), or the
+  **system** (only for expiring an offer). A move by the wrong person is refused.
+- Finished applications (accepted, declined, expired, rejected, withdrawn) can't change any more.
+- Once an offer is made, the group can accept or decline, but not withdraw.
+- **Deadline:** an offer counts as expired at the exact deadline time. Accepting needs the deadline and the
+  current time to be checked; if they aren't passed in, the move is refused, so later code can't skip the check.
+- A test reads the diagram above and checks that the code allows exactly the same moves. If you change the
+  diagram, the test fails until the code matches (and the other way round).
+
 Rules:
 
-- The group size must fit the unit (bedrooms or beds).
+- The group size must fit the unit (beds; if a unit doesn't list beds, its bedrooms).
 - A group can have only one active application per unit.
 - An offer has a deadline. A scheduled job or a check-on-read moves it to `expired` when the deadline
   passes and puts the unit back to available.
@@ -576,6 +593,14 @@ browser with its own cookies.
 | 39  | Malformed uuid in a route                                                                 | A                | 400                                                           | ✅ pass (automated)         |
 | 40  | Non-`@scu.edu` invite, self-invite, duplicate invite                                      | A                | 400 / 400 / 409 `INVITE_EXISTS`                               | ✅ pass (automated)         |
 | 41  | 16th seat, then 17th seat                                                                 | A                | 16th 201; 17th 409 `GROUP_FULL`                               | ✅ pass (automated)         |
+| 66  | Application rules match the Workflow C diagram (the test reads the diagram)               | unit test        | exactly the diagram's moves, each by the same actor           | ✅ pass (automated)         |
+| 67  | Every allowed application move, made by the right person                                  | unit test        | allowed                                                       | ✅ pass (automated)         |
+| 68  | Moves the diagram doesn't allow (e.g. submitted → offered, offered → withdrawn)           | unit test        | refused: "can't go from … to …"                               | ✅ pass (automated)         |
+| 69  | Each move made by the wrong person (e.g. a group member making an offer)                  | unit test        | refused, naming who can make that move                        | ✅ pass (automated)         |
+| 70  | Any move out of a finished application (accepted, declined, expired, rejected, withdrawn) | unit test        | refused: it can't change any more                             | ✅ pass (automated)         |
+| 71  | Offer deadline: 1 ms before, exactly at, and 1 ms after                                   | unit test        | accept works only before it; at the deadline it's expired     | ✅ pass (automated)         |
+| 72  | Accept or expire an offer without passing the deadline                                    | unit test        | refused (`MISSING_DEADLINE`), so the check can't be skipped   | ✅ pass (automated)         |
+| 73  | Group size vs. unit: equal, one too many, beds vs. bedrooms, 1 and 16 people, bad sizes   | unit test        | fits only when size ≤ beds (or bedrooms if no beds)           | ✅ pass (automated)         |
 
 Latest run (local, 2026-11-09): **51 tests, 6 files, all passing.**
 
