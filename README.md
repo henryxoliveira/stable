@@ -339,7 +339,9 @@ middleware steps are already in place.
 **Every request** passes through `src/app.js` in this order:
 
 1. `helmet()`: security headers (CSP, HSTS, frame protection).
-2. Static files and `/healthz` are served without a session.
+2. Static files and `/health` are served without a session. The health endpoint returns
+   `200` with `{"status":"ok"}`. Avoid health paths ending in `z`, which can conflict with
+   [Cloud Run reserved URL paths](https://cloud.google.com/run/docs/known-issues#reserved-url-paths).
 3. Body parsing (100 KB limit).
 4. `sessionMiddleware`: reads the signed `stable.sid` cookie and loads the session row from Postgres.
 5. `loadUser`: re-reads the user by `session.userId`. Suspended or deleted users are logged out.
@@ -546,7 +548,17 @@ gcloud run deploy stable --image $IMAGE --region REGION --service-account $SA \
 ```
 
 (`--allow-unauthenticated` only makes the URL reachable. The app itself requires login for everything except
-`/login`, `/register`, static files, and `/healthz`.)
+`/login`, `/register`, static files, and `/health`.)
+
+After deploying, verify the public health endpoint on the service URL:
+
+```bash
+SERVICE_URL=$(gcloud run services describe stable --region REGION --format='value(status.url)')
+curl --fail-with-body "$SERVICE_URL/health"
+# Expected: {"status":"ok"} with HTTP 200, without login or a session cookie.
+```
+
+Use `/health` for external health checks; `/healthz` conflicts with Cloud Run's reserved paths.
 
 ### First deploy only: create the admin
 
