@@ -126,7 +126,7 @@ this too, so they're ready when an admin approves them; they just can't publish 
 - A **floor plan** belongs to a unit: a name (unique within the unit), optional square feet, and notes. The
   image upload comes with Cloud Storage uploads (A4).
 - **Money** is typed in dollars (`2400`, `2400.50`, or `$2,400.50`) and stored as integer cents (`240050`),
-  parsed from the text in `src/utils/money.js` so no floating-point rounding is involved. Amounts over
+  parsed from the text in `src/utils/money.js` (shared with the cost calculator) so no floating-point rounding is involved. Amounts over
   $100,000, negative amounts, and more than two digits of cents are refused.
 - **Who can do what:** the owner can create and edit. Another landlord gets **404** on every page and
   action (they can't tell it exists), and their list only ever loads their own rows (the filter is in the
@@ -299,7 +299,8 @@ Each estimate is private to the student who made it.
   uses the group's size. Only accepted members can link a group. If the student later leaves the group,
   the estimate says "Linked group no longer available" and hides the group's details.
 - **Results are worked out fresh** every time an estimate is opened. Only the inputs are saved.
-- Code: the math is in `src/services/cost.service.js` (no database, so it is easy to test). Saving and
+- Code: the math is in `src/services/cost.service.js` (no database, so it is easy to test). Typed amounts are
+  parsed by `src/utils/money.js`, the same parser the unit forms use, so both accept and refuse the same input. Saving and
   loading is in `src/services/costEstimate.service.js`.
 
 ## How the system starts
@@ -726,7 +727,7 @@ browser with its own cookies.
 | 102 | Anonymous access; landlord POST without a CSRF token                                                          | anonymous, L     | 302 → `/login` / 401; 403 and nothing saved                                                                                         | ✅ pass (automated)         |
 | 103 | Money parser and formatter (`src/utils/money.js`)                                                             | unit test        | exact cents; bad input refused; `$2,400.50` formatting                                                                              | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-24): **212 tests, 10 files, all passing.**
+Latest run (local, 2026-11-25): **233 tests, 12 files, all passing.**
 
 ## Security review
 

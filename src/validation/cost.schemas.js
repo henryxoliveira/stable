@@ -1,12 +1,12 @@
 /**
  * zod schemas for the cost calculator. Money arrives as text typed in dollars
- * ("$4,000.50") and leaves as integer cents, using the strict parser in
- * cost.service.js. Field names match the form; the result is renamed to the
+ * ("$4,000.50") and leaves as integer cents, using the shared parser in
+ * src/utils/money.js. Field names match the form; the result is renamed to the
  * database fields (rent → rentCents, …).
  */
 import { z } from 'zod';
 import { MAX_GROUP_SEATS } from '../config/limits.js';
-import { parseDollarsToCents } from '../services/cost.service.js';
+import { parseDollarsToCents } from '../utils/money.js';
 
 /** Treat "" / missing as "not given". JSON numbers become text for the money parser. */
 const blankToUndefined = (value) =>

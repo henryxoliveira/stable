@@ -1,5 +1,6 @@
 /**
- * Money helpers. All money in Stable is integer CENTS, never floating-point
+ * Money helpers, shared by every form that takes an amount (cost calculator,
+ * units). All money in Stable is integer CENTS, never floating-point
  * dollars (0.1 + 0.2 !== 0.3 in JavaScript). Typed amounts are parsed from the
  * text digit by digit, so "$2,400.50" becomes exactly 240050.
  */
@@ -11,7 +12,7 @@ export const MAX_AMOUNT_CENTS = 100_000_00;
  * Optional "$", then digits (plain, or grouped by commas in threes), then
  * optionally "." and 1–2 digits of cents.
  *   ok: 2400  2400.5  2400.50  2,400  $2,400.50  0
- *   no: 24,00  -5  1.2.3  .50  2400.505
+ *   no: 24,00  -5  1.2.3  .50  2400.505 (that one gets its own "at most 2 digits" message)
  */
 const AMOUNT_PATTERN = /^\$?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/;
 
@@ -25,6 +26,9 @@ export function parseDollarsToCents(input) {
     typeof input === 'number' ? String(input) : typeof input === 'string' ? input.trim() : '';
   if (text === '') return { error: 'Enter an amount. Use 0 if there is none.' };
   if (text.includes('-')) return { error: "Amounts can't be negative." };
+  if (/\.\d{3,}$/.test(text)) {
+    return { error: 'Use at most 2 digits after the decimal point (cents).' };
+  }
 
   const match = AMOUNT_PATTERN.exec(text);
   if (!match) return { error: 'Enter an amount like 1250 or 1250.50.' };

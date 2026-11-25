@@ -4,7 +4,7 @@
  */
 import * as estimates from '../services/costEstimate.service.js';
 import { listMyGroups } from '../services/group.service.js';
-import { formatCents } from '../services/cost.service.js';
+import { formatCents } from '../utils/money.js';
 import { HttpError, notFound } from '../utils/httpError.js';
 import { wantsJson } from '../utils/request.js';
 
