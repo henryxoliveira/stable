@@ -40,11 +40,88 @@ model User {
 
   ownedGroups      RoommateGroup[]
   groupMemberships GroupMember[]
+  properties       Property[]
   sentInvitations  GroupInvitation[]
   groupEvents      GroupEvent[]
   costEstimates    CostEstimate[]
 
   @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Properties, units, floor plans (roadmap A2). Logic lives in
+// src/services/property.service.js. Landlords own properties; units and floor
+// plans belong to the property's owner. Money is integer cents.
+// CHECK constraints (ranges, cents >= 0) are added in the migration SQL.
+// ---------------------------------------------------------------------------
+
+/// AVAILABLE until a group's offer is accepted (roadmap B5 sets LEASED).
+enum UnitStatus {
+  AVAILABLE
+  LEASED
+}
+
+/// A building or house a landlord rents out.
+model Property {
+  id          String   @id @default(uuid()) @db.Uuid
+  ownerId     String   @map("owner_id") @db.Uuid
+  name        String
+  address     String // street address, e.g. "1234 Franklin St"
+  city        String
+  state       String   @default("CA") // two letters
+  postalCode  String   @map("postal_code")
+  /// Optional for now; the map (A5) and distance filters use them when set.
+  latitude    Float?
+  longitude   Float?
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  owner User   @relation(fields: [ownerId], references: [id])
+  units Unit[]
+
+  @@index([ownerId])
+  @@map("properties")
+}
+
+/// One rentable unit in a property (an apartment, or a whole house).
+model Unit {
+  id             String     @id @default(uuid()) @db.Uuid
+  propertyId     String     @map("property_id") @db.Uuid
+  label          String // "Unit 2B", unique within the property
+  bedrooms       Int // 0 = studio
+  /// How many people the unit fits (a roommate group must be this size or smaller).
+  beds           Int
+  bathrooms      Float // in steps of 0.5
+  squareFeet     Int?       @map("square_feet")
+  rentCents      Int        @map("rent_cents") // per month, whole unit
+  utilitiesCents Int        @default(0) @map("utilities_cents") // per month
+  parkingCents   Int        @default(0) @map("parking_cents") // per month
+  status         UnitStatus @default(AVAILABLE)
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  property   Property    @relation(fields: [propertyId], references: [id])
+  floorPlans FloorPlan[]
+
+  @@unique([propertyId, label])
+  @@map("units")
+}
+
+/// A floor plan for a unit. The image upload arrives with GCS uploads (A4).
+model FloorPlan {
+  id         String   @id @default(uuid()) @db.Uuid
+  unitId     String   @map("unit_id") @db.Uuid
+  name       String // "Main floor", unique within the unit
+  squareFeet Int?     @map("square_feet")
+  notes      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  unit Unit @relation(fields: [unitId], references: [id])
+
+  @@unique([unitId, name])
+  @@map("floor_plans")
 }
 
 /// Server-side sessions, owned by connect-pg-simple (express-session store).

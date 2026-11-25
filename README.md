@@ -5,7 +5,7 @@
 A horse's home is its stable. The name is a nod to the SCU Broncos.
 
 - **Public URL:** TODO (Cloud Run URL after first deploy)
-- **Status:** authentication, roommate groups, and the cost calculator are built. Other features are being built in PRs (see [Roadmap](#roadmap)).
+- **Status:** authentication, roommate groups, the cost calculator, and landlord properties/units/floor plans are built. Other features are being built in PRs (see [Roadmap](#roadmap)).
 
 > Stable is a student class prototype. It is **not** affiliated with or endorsed by SCU Housing, does not
 > connect to any SCU system, and uses team-seeded listing data (nothing is scraped from Zillow,
@@ -65,7 +65,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Role and account-status checks; record-ownership helper                               | ✅     |
 | First-admin seed script (idempotent)                                                  | ✅     |
 | Admin: approve or reject landlord accounts; promote admins                            | ⬜     |
-| Landlord: properties, units, floor plans; listing approval workflow                   | ⬜     |
+| Landlord: properties, units, floor plans; listing approval workflow                   | 🚧     |
 | Floor plan and photo uploads to Google Cloud Storage                                  | ⬜     |
 | Interactive map (Leaflet + OpenStreetMap), with price, units, and floor plans per pin | ⬜     |
 | Search filters: price per person, distance to campus (haversine), bedrooms            | ⬜     |
@@ -97,6 +97,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Owns this specific record                | `assertOwnership` / `loadOwned` in `src/middleware/authorize.js`                                |
 | Can't self-register as admin             | zod enum in `src/validation/auth.schemas.js` **and** a guard in `src/services/auth.service.js`  |
 | Unapproved listings hidden from students | Prisma `where` filter in the listing service (TODO)                                             |
+| Property, unit, floor plan: owner only   | `assertCanEdit()` in `src/services/property.service.js` (404 others; admins view, 403 on edit)  |
 | Group page/actions: member or invitee    | `loadAccess()` in `src/services/group.service.js` (404 for anyone else; admins may view)        |
 | Group owner-only actions                 | `requireOwner()` in `src/services/group.service.js` (403 for members and invitees)              |
 | Cost estimate: only its owner            | every query in `src/services/costEstimate.service.js` filters by `userId` (404 for anyone else) |
@@ -110,6 +111,31 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 - Any request for a record the user isn't allowed to see returns **404**, so the response doesn't reveal that
   the record exists. When the user can see a record but not perform an action, the response is **403**.
   The data itself is never returned.
+
+## Properties, units, and floor plans
+
+A landlord sets these up from **Properties** on their dashboard (`/properties`). Pending landlords can do
+this too, so they're ready when an admin approves them; they just can't publish listings yet.
+
+- A **property** is a building or house: name, street address, city, state, ZIP, an optional map location
+  (latitude and longitude, both or neither), and a description.
+- A **unit** is one rentable place in a property: a label (unique within the property), bedrooms (0 for a
+  studio), **beds** (how many people it fits, 1 to 16, the same as the largest roommate group), bathrooms
+  in half steps, optional square feet, and monthly **rent, utilities, and parking** for the whole unit.
+  Every unit starts `AVAILABLE`. Only accepting an offer (B5) will mark it `LEASED`.
+- A **floor plan** belongs to a unit: a name (unique within the unit), optional square feet, and notes. The
+  image upload comes with Cloud Storage uploads (A4).
+- **Money** is typed in dollars (`2400`, `2400.50`, or `$2,400.50`) and stored as integer cents (`240050`),
+  parsed from the text in `src/utils/money.js` so no floating-point rounding is involved. Amounts over
+  $100,000, negative amounts, and more than two digits of cents are refused.
+- **Who can do what:** the owner can create and edit. Another landlord gets **404** on every page and
+  action (they can't tell it exists), and their list only ever loads their own rows (the filter is in the
+  query). Admins can view every property, with the owner's email, but get **403** on edits. Students get
+  **403** on every property route.
+- The database backs up the form rules with CHECK constraints (beds 1 to 16, cents ≥ 0, valid coordinates,
+  latitude and longitude set together) and unique indexes for unit labels and floor plan names.
+- Code: `src/services/property.service.js`, `src/controllers/properties.controller.js`,
+  `src/validation/property.schemas.js`, views in `src/views/properties/`, `units/`, and `floor-plans/`.
 
 ## Workflows
 
@@ -385,7 +411,8 @@ the group. An offer stores `offerExpiresAt`.
 
 ## Data model
 
-**Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init`, `20261110030323_roommate_groups`, and `20261124073118_cost_estimates`):
+**Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init`, `20261110030323_roommate_groups`,
+`20261124073118_cost_estimates`, and `20261125025154_properties_units_floor_plans`):
 
 | Table     | Columns                                                                                                                                                                 | Notes                        |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
@@ -399,8 +426,17 @@ the group. An offer stores `offerExpiresAt`.
 | `group_invitations` | `id`, `group_id`, `email` (lowercased), `status` (PENDING/ACCEPTED/DECLINED/CANCELLED), `invited_by_id`, `created_at`, `responded_at`                                                              | Tied to an email, not a user. Unique `(group_id, email)`; index `(email, status)`    |
 | `group_events`      | `id`, `group_id`, `actor_id` → users, `type` (CREATED, INVITED, INVITE_CANCELLED, INVITE_ACCEPTED, INVITE_DECLINED, OWNERSHIP_TRANSFERRED, MEMBER_LEFT, DISBANDED), `detail` (jsonb), `created_at` | Append-only audit log                                                                |
 
+| Table         | Columns                                                                                                                                                                                                  | Notes                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `properties`  | `id`, `owner_id` → users, `name`, `address`, `city`, `state` (default CA), `postal_code`, `latitude`, `longitude` (both or neither), `description`, `created_at`, `updated_at`                           | Index on `owner_id`                                                |
+| `units`       | `id`, `property_id` → properties, `label`, `bedrooms`, `beds` (1–16), `bathrooms` (half steps), `square_feet`, `rent_cents`, `utilities_cents`, `parking_cents`, `status` (AVAILABLE/LEASED), timestamps | Unique `(property_id, label)`; CHECKs on ranges and cents ≥ 0      |
+| `floor_plans` | `id`, `unit_id` → units, `name`, `square_feet`, `notes`, timestamps                                                                                                                                      | Unique `(unit_id, name)`. The image file arrives with uploads (A4) |
+
 ```mermaid
 erDiagram
+    users ||--o{ properties : owns
+    properties ||--o{ units : has
+    units ||--o{ floor_plans : has
     users ||--o{ roommate_groups : owns
     roommate_groups ||--o{ group_members : has
     users ||--o{ group_members : "is"
@@ -432,9 +468,6 @@ erDiagram
 
 ```mermaid
 erDiagram
-    users ||--o{ properties : owns
-    properties ||--o{ units : has
-    units ||--o{ floor_plans : has
     units ||--o{ listings : "listed as"
     users ||--o{ listings : owns
     listings ||--o{ listing_reviews : "admin comments"
@@ -447,8 +480,7 @@ erDiagram
     users ||--o{ notifications : receives
 ```
 
-Key fields (planned): `properties(lat, lng, address)`, `units(bedrooms, beds, rent_cents, utilities_cents,
-parking_cents, status available|leased)`, `listings(status, kind off_campus|on_campus|sublease, owner_id)`,
+Key fields (planned): `listings(status, kind off_campus|on_campus|sublease, owner_id)`,
 `applications(status, offer_expires_at)`, `application_events(actor_id, from_status, to_status, comment, created_at)`.
 Money is stored in integer cents.
 
@@ -679,6 +711,20 @@ browser with its own cookies.
 | 71  | Offer deadline: 1 ms before, exactly at, and 1 ms after                                                       | unit test        | accept works only before it; at the deadline it's expired                                                                           | ✅ pass (automated)         |
 | 72  | Accept or expire an offer without passing the deadline                                                        | unit test        | refused (`MISSING_DEADLINE`), so the check can't be skipped                                                                         | ✅ pass (automated)         |
 | 73  | Group size vs. unit: equal, one too many, beds vs. bedrooms, 1 and 16 people, bad sizes                       | unit test        | fits only when size ≤ beds (or bedrooms if no beds)                                                                                 | ✅ pass (automated)         |
+| 90  | Pending landlord adds a property, a unit, and a floor plan through the forms                                  | L                | 302s; all three on the property page                                                                                                | ✅ pass (automated)         |
+| 91  | Saved values: state `ca`, rent `$2,400.50`, blank utilities                                                   | L                | `CA`; 240050 cents; 0; unit AVAILABLE                                                                                               | ✅ pass (automated)         |
+| 92  | Owner edits all three; clears optional boxes                                                                  | L                | saved; cleared fields become null; money shown in dollars                                                                           | ✅ pass (automated)         |
+| 93  | Duplicate unit label / floor plan name (same place vs. another one)                                           | L                | 409 `UNIT_LABEL_TAKEN` / `FLOOR_PLAN_NAME_TAKEN`; else ok                                                                           | ✅ pass (automated)         |
+| 94  | Log in again and read the property (persistence)                                                              | L                | same data, rent still 240050                                                                                                        | ✅ pass (automated)         |
+| 95  | Property: blank fields, bad ZIP/state, half a location, coordinates out of range                              | L                | 400 with the right field; nothing saved                                                                                             | ✅ pass (automated)         |
+| 96  | Unit: beds 0/17/2.5, bedrooms "two", 1.3 baths, rent blank/negative/over $100k/`24,00`                        | L                | 400 with the right field; nothing saved                                                                                             | ✅ pass (automated)         |
+| 97  | Studio (0 bedrooms, 1 bed), JSON numbers; HTML form with beds 40                                              | L                | 201; form re-shown with the error and typed values                                                                                  | ✅ pass (automated)         |
+| 98  | Malformed and unknown ids                                                                                     | L                | 400 / 404                                                                                                                           | ✅ pass (automated)         |
+| 99  | Another landlord opens or changes any of it                                                                   | L, L2            | 404 on every page and action; their list is empty                                                                                   | ✅ pass (automated)         |
+| 100 | Student uses any property route                                                                               | L, S             | 403 everywhere; nothing changes                                                                                                     | ✅ pass (automated)         |
+| 101 | Admin views all properties, then tries every edit                                                             | L, L2, admin     | 200 with owner email; 403 on every edit; nothing changes                                                                            | ✅ pass (automated)         |
+| 102 | Anonymous access; landlord POST without a CSRF token                                                          | anonymous, L     | 302 → `/login` / 401; 403 and nothing saved                                                                                         | ✅ pass (automated)         |
+| 103 | Money parser and formatter (`src/utils/money.js`)                                                             | unit test        | exact cents; bad input refused; `$2,400.50` formatting                                                                              | ✅ pass (automated)         |
 
 Latest run (local, 2026-11-24): **212 tests, 10 files, all passing.**
 
@@ -715,6 +761,8 @@ when Prisma 6.x or ESLint ship patched releases.
   verification would fix this.
 - Invitations are in-app only: no email is sent, so the owner has to tell the person to log in or register.
 - A student can be invited to several groups for the same term, but can join only one (the others get 409 on accept).
+- Properties, units, and floor plans can't be deleted yet (listings and applications will point at units).
+- Map coordinates are typed in by hand. There's no address lookup (geocoding) yet.
 - TODO: add more as features land.
 
 ## Team contributions
@@ -754,7 +802,7 @@ the application state machine, offers, and the cost calculator.
 | Member A                                                                       | Member B                                                                             |
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | A1. Admin: list pending landlords; approve or reject; promote to admin         | ✅ B1. Schema + service: roommate groups per term, invites, accept/decline, "ready"  |
-| A2. Properties, units, floor plans (CRUD with ownership + tests)               | ✅ B2. Cost calculator service + page (cents, rent split, on- vs. off-campus)        |
+| ✅ A2. Properties, units, floor plans (create/edit with ownership + tests)     | ✅ B2. Cost calculator service + page (cents, rent split, on- vs. off-campus)        |
 | A3. Listing state machine + admin review queue with comments                   | B3. Application schema + state machine + `application_events`                        |
 | A4. GCS uploads (multer memory, type/size checks) for floor plans and photos   | B4. Landlord review actions: docs requested, under review, offer with deadline       |
 | A5. Map page (Leaflet, vendored) + JSON endpoint + haversine and price filters | B5. Accept offer with a transaction and `FOR UPDATE`; auto-close competitors; expiry |

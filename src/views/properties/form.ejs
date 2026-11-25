@@ -1,0 +1,46 @@
+<%- include('../partials/header', { title: property ? 'Edit property' : 'Add a property' }) %>
+<p><a href="<%= property ? '/properties/' + property.id : '/properties' %>">← Back</a></p>
+<h1><%= property ? 'Edit ' + property.name : 'Add a property' %></h1>
+<% if (errors._form) { %><p class="alert" role="alert"><%= errors._form %></p><% } %>
+
+<form method="post" action="<%= property ? '/properties/' + property.id : '/properties' %>" class="card" novalidate>
+  <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+
+  <label for="name">Name</label>
+  <input id="name" name="name" type="text" maxlength="80" required placeholder="e.g. The Franklin House" value="<%= values.name || '' %>">
+  <%- include('../partials/field-error', { field: 'name' }) %>
+
+  <label for="address">Street address</label>
+  <input id="address" name="address" type="text" maxlength="120" required value="<%= values.address || '' %>">
+  <%- include('../partials/field-error', { field: 'address' }) %>
+
+  <label for="city">City</label>
+  <input id="city" name="city" type="text" maxlength="60" required value="<%= values.city || '' %>">
+  <%- include('../partials/field-error', { field: 'city' }) %>
+
+  <label for="state">State</label>
+  <input id="state" name="state" type="text" maxlength="2" value="<%= values.state || '' %>">
+  <%- include('../partials/field-error', { field: 'state' }) %>
+
+  <label for="postalCode">ZIP code</label>
+  <input id="postalCode" name="postalCode" type="text" inputmode="numeric" required value="<%= values.postalCode || '' %>">
+  <%- include('../partials/field-error', { field: 'postalCode' }) %>
+
+  <fieldset>
+    <legend>Map location (optional)</legend>
+    <p class="muted">Used by the map later. Right-click the place in a map app to copy its coordinates.</p>
+    <label for="latitude">Latitude</label>
+    <input id="latitude" name="latitude" type="text" inputmode="decimal" placeholder="37.3496" value="<%= values.latitude ?? '' %>">
+    <%- include('../partials/field-error', { field: 'latitude' }) %>
+    <label for="longitude">Longitude</label>
+    <input id="longitude" name="longitude" type="text" inputmode="decimal" placeholder="-121.9390" value="<%= values.longitude ?? '' %>">
+    <%- include('../partials/field-error', { field: 'longitude' }) %>
+  </fieldset>
+
+  <label for="description">Description (optional)</label>
+  <textarea id="description" name="description" maxlength="1000" rows="4"><%= values.description || '' %></textarea>
+  <%- include('../partials/field-error', { field: 'description' }) %>
+
+  <button type="submit" class="btn"><%= property ? 'Save changes' : 'Add property' %></button>
+</form>
+<%- include('../partials/footer') %>
