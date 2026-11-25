@@ -295,7 +295,9 @@ the first admin exist?
    - **Reject** a pending landlord, with an optional reason: `PENDING → REJECTED`. A rejected landlord can't
      log in, and any session they still have is dropped on their next request.
    - **Promote** an active student or landlord to admin by email. Pending, suspended, and rejected accounts
-     can't be promoted, so an unapproved landlord can't skip the queue.
+     can't be promoted, so an unapproved landlord can't skip the queue. A student who is in an active
+     roommate group (as owner or member) can't be promoted either (`409 IN_ROOMMATE_GROUP`): admins get 403
+     on group actions, so they could never leave or hand off the group. They leave it first, then get promoted.
    - Each decision is one transaction: an `UPDATE … WHERE status = 'PENDING'` (or `role`/`status` for
      promotion) plus an `account_events` audit row. If two admins decide the same landlord at once, the
      second update matches no rows and gets `409 NOT_PENDING`, so only one decision is ever recorded.
@@ -708,8 +710,10 @@ browser with its own cookies.
 | 85  | Promote form with a bad email, then an unknown one                                                            | admin            | 400 and 404, message on the page, typed email kept                                                                                  | ✅ pass (automated)         |
 | 86  | Student, pending landlord (on themselves), approved landlord use any admin route                              | S, L, L2         | 403 on every page, API, and action; no changes or events                                                                            | ✅ pass (automated)         |
 | 87  | Anonymous admin page / API; admin POST without a CSRF token                                                   | anonymous, admin | 302 → `/login` / 401; 403 and nothing changes                                                                                       | ✅ pass (automated)         |
+| 88  | Promote a group owner and a group member; then each leaves and is promoted                                    | A, B, admin      | 409 `IN_ROOMMATE_GROUP` (no change, no event); then 200 each                                                                        | ✅ pass (automated)         |
+| 89  | Race ×5: student accepts a group invite while an admin promotes them                                          | A, B, admin      | accept 200 + promote 409, or promote 200 + accept 403                                                                               | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-24): **212 tests, 10 files, all passing.**
+Latest run (local, 2026-11-25): **229 tests, 11 files, all passing.**
 
 ## Security review
 
@@ -744,6 +748,9 @@ when Prisma 6.x or ESLint ship patched releases.
   verification would fix this.
 - Invitations are in-app only: no email is sent, so the owner has to tell the person to log in or register.
 - A student can be invited to several groups for the same term, but can join only one (the others get 409 on accept).
+- Promoting a landlord who owns properties will leave those properties without an editor once properties
+  land (A2), because admins can view but not edit them, and there's no way to transfer a property yet.
+  Promote a separate account instead.
 - A rejected landlord can't register again with the same email (409), and there is no "undo" for a
   rejection or a promotion in the app yet. An operator would fix those in the database.
 - TODO: add more as features land.

@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createUser, prisma, resetDb } from './helpers/db.js';
 import { getCsrfToken, login, newAgent, postForm, postJson, register } from './helpers/http.js';
 import { MAX_REASON_LENGTH } from '../src/validation/admin.schemas.js';
+import { upcomingTerms } from '../src/services/group.service.js';
 
 beforeEach(resetDb);
 
@@ -47,6 +48,18 @@ const events = () =>
     orderBy: { createdAt: 'asc' },
     include: { actor: true, target: true },
   });
+
+// Roommate group helpers (student side; CSRF token from /groups).
+const [TERM] = upcomingTerms();
+async function createGroup(owner, name = 'Hilltop House') {
+  const res = await postJson(owner, '/groups', { name, term: TERM });
+  expect(res.status).toBe(201);
+  return res.body.group.id;
+}
+async function inviteAndGetId(owner, groupId, invitee, email) {
+  expect((await postJson(owner, `/groups/${groupId}/invites`, { email })).status).toBe(201);
+  return (await invitee.get('/api/groups')).body.invitations[0].id;
+}
 
 /** Try the listing-submit route: 403 ACCOUNT_PENDING until approved, then 501 (stub). */
 async function trySubmitListing(landlord) {
@@ -223,6 +236,87 @@ describe('promote to admin', () => {
     expect(res.status).toBe(200);
     expect(res.body.user).toMatchObject({ role: 'ADMIN', status: 'ACTIVE' });
     expect((await events())[0].detail).toEqual({ fromRole: 'LANDLORD' });
+  });
+
+  it('refuses a student who owns or belongs to an active roommate group, until they leave it', async () => {
+    const admin = await adminAgent();
+    const amy = await registered('amy@scu.edu', 'STUDENT');
+    const ben = await registered('ben@scu.edu', 'STUDENT');
+    const groupId = await createGroup(amy);
+    const inviteId = await inviteAndGetId(amy, groupId, ben, 'ben@scu.edu');
+    expect((await postJson(ben, `/invites/${inviteId}/accept`)).status).toBe(200);
+
+    for (const email of ['amy@scu.edu', 'ben@scu.edu']) {
+      const res = await adminPost(admin, '/admin/promote', { email });
+      expect(res.status, email).toBe(409);
+      expect(res.body.error.code, email).toBe('IN_ROOMMATE_GROUP');
+      expect(res.body.error.message, email).toContain('"Hilltop House"');
+      expect((await userByEmail(email)).role, email).toBe('STUDENT');
+    }
+    expect(await prisma.accountEvent.count()).toBe(0);
+
+    // The HTML form shows the same message on the page.
+    const page = await postForm(
+      admin,
+      '/admin/promote',
+      { email: 'ben@scu.edu' },
+      { tokenFrom: ADMIN_PAGE },
+    );
+    expect(page.status).toBe(409);
+    expect(page.text).toContain('leave it or hand it off');
+
+    // Ben leaves, then Amy (now alone) leaves and the group is disbanded: both can be promoted.
+    expect((await postJson(ben, `/groups/${groupId}/leave`)).status).toBe(200);
+    expect((await adminPost(admin, '/admin/promote', { email: 'ben@scu.edu' })).status).toBe(200);
+    expect((await postJson(amy, `/groups/${groupId}/leave`)).body.disbanded).toBe(true);
+    expect((await adminPost(admin, '/admin/promote', { email: 'amy@scu.edu' })).status).toBe(200);
+  });
+
+  it('race: promote vs. accepting a group invite, never an admin stuck in a group', async () => {
+    const admin = await adminAgent();
+    const amy = await registered('amy@scu.edu', 'STUDENT');
+    const groupId = await createGroup(amy);
+    const adminToken = await getCsrfToken(admin, ADMIN_PAGE);
+    const tally = { acceptFirst: 0, promoteFirst: 0 };
+
+    for (let round = 1; round <= 5; round += 1) {
+      const email = `invitee${round}@scu.edu`;
+      await createUser({ email, role: 'STUDENT' });
+      const invitee = newAgent();
+      await login(invitee, email);
+      const inviteId = await inviteAndGetId(amy, groupId, invitee, email);
+      const inviteeToken = await getCsrfToken(invitee, '/groups');
+
+      const [acc, promo] = await Promise.all([
+        invitee
+          .post(`/invites/${inviteId}/accept`)
+          .set('x-csrf-token', inviteeToken)
+          .set('Accept', 'application/json'),
+        admin
+          .post('/admin/promote')
+          .set('x-csrf-token', adminToken)
+          .set('Accept', 'application/json')
+          .send({ email }),
+      ]);
+      const label = `round ${round}: accept ${acc.status}, promote ${promo.status}`;
+      const user = await userByEmail(email);
+      const memberships = await prisma.groupMember.count({ where: { userId: user.id } });
+
+      if (acc.status === 200) {
+        tally.acceptFirst += 1;
+        expect(promo.status, label).toBe(409);
+        expect(promo.body.error.code, label).toBe('IN_ROOMMATE_GROUP');
+        expect(user.role, label).toBe('STUDENT');
+        expect(memberships, label).toBe(1);
+      } else {
+        tally.promoteFirst += 1;
+        expect(promo.status, label).toBe(200);
+        expect(acc.status, label).toBe(403); // admins can't use student group routes
+        expect(user.role, label).toBe('ADMIN');
+        expect(memberships, label).toBe(0);
+      }
+    }
+    console.info('promote vs. accept, 5 rounds:', tally);
   });
 
   it('refuses unknown emails, admins, and accounts that are not active', async () => {

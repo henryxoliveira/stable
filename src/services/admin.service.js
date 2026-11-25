@@ -100,8 +100,11 @@ export function rejectLandlord(admin, landlordId, reason) {
 
 /**
  * Make an existing ACTIVE student or landlord an admin.
- * 404 unknown email; 409 already an admin, or the account isn't active
- * (approve a pending landlord first; suspended/rejected accounts stay out).
+ * 404 unknown email; 409 already an admin, the account isn't active
+ * (approve a pending landlord first; suspended/rejected accounts stay out),
+ * or the student is in an active roommate group. Admins get 403 on every
+ * group action, so a promoted member could never leave, invite, or hand
+ * off ownership, and a group they own would be stuck.
  * @param {{ id: string }} admin
  * @param {string} email  already trimmed and lowercased by zod
  */
@@ -114,6 +117,22 @@ export async function promoteToAdmin(admin, email) {
       throw conflict(
         `Only active accounts can be promoted. This one is ${user.status.toLowerCase()}.`,
         'ACCOUNT_NOT_ACTIVE',
+      );
+    }
+
+    // Lock the user's row first: joining or creating a group locks the same
+    // row (group.service.js), so a student can't join a group between this
+    // check and the update below.
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id}::uuid FOR UPDATE`;
+    const membership = await tx.groupMember.findFirst({
+      where: { userId: user.id, group: { status: 'ACTIVE' } },
+      select: { group: { select: { name: true, term: true } } },
+    });
+    if (membership) {
+      const { name, term } = membership.group;
+      throw conflict(
+        `This student is in the roommate group "${name}" (${term}). They need to leave it or hand it off before they can be promoted.`,
+        'IN_ROOMMATE_GROUP',
       );
     }
 
