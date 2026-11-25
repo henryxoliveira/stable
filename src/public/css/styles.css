@@ -194,6 +194,19 @@ a.btn {
   display: flex;
   gap: 0.5rem;
 }
+.rows .actions input[type='text'] {
+  width: 12rem;
+  padding: 0.3rem 0.5rem;
+}
+/* Hidden on screen, still read by screen readers (labels for compact forms). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .badge {
   display: inline-block;
   padding: 0 0.5rem;

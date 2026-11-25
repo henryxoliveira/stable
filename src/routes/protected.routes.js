@@ -7,9 +7,11 @@ import * as auth from '../controllers/auth.controller.js';
 import * as dashboard from '../controllers/dashboard.controller.js';
 import * as groups from '../controllers/groups.controller.js';
 import * as listings from '../controllers/listings.controller.js';
+import * as admin from '../controllers/admin.controller.js';
 import { requireActiveAccount, requireRole } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { z } from 'zod';
+import { promoteSchema, rejectSchema, userIdParams } from '../validation/admin.schemas.js';
 import {
   createGroupSchema,
   groupIdParams,
@@ -29,6 +31,28 @@ router.get('/dashboard', dashboard.redirectToRoleDashboard);
 router.get('/dashboard/student', requireRole('STUDENT'), dashboard.student);
 router.get('/dashboard/landlord', requireRole('LANDLORD'), dashboard.landlord);
 router.get('/dashboard/admin', requireRole('ADMIN'), dashboard.admin);
+
+// Admin accounts (A1): approve or reject pending landlords, promote to admin.
+// Admins only; everyone else gets 403 from requireRole.
+const adminOnly = requireRole('ADMIN');
+const userId = validate(userIdParams, { source: 'params' });
+
+router.get('/admin/accounts', adminOnly, admin.accounts);
+router.get('/api/admin/landlords/pending', adminOnly, admin.apiPending);
+router.post('/admin/landlords/:id/approve', adminOnly, userId, admin.approve);
+router.post(
+  '/admin/landlords/:id/reject',
+  adminOnly,
+  userId,
+  validate(rejectSchema, { view: admin.formInvalid }),
+  admin.reject,
+);
+router.post(
+  '/admin/promote',
+  adminOnly,
+  validate(promoteSchema, { view: admin.formInvalid }),
+  admin.promote,
+);
 
 // JSON API
 router.get('/api/me', dashboard.me);
