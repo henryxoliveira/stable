@@ -23,10 +23,12 @@ enum Role {
 /// ACTIVE: can use everything their role allows.
 /// PENDING: landlord awaiting admin approval; can log in but cannot publish.
 /// SUSPENDED: cannot log in (existing sessions are dropped on next request).
+/// REJECTED: landlord the admin turned down; blocked from logging in like SUSPENDED.
 enum UserStatus {
   ACTIVE
   PENDING
   SUSPENDED
+  REJECTED
 }
 
 model User {
@@ -38,6 +40,9 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
+  /// Admin decisions this user made, and decisions made about this user.
+  accountActions   AccountEvent[]    @relation("AccountEventActor")
+  accountEvents    AccountEvent[]    @relation("AccountEventTarget")
   ownedGroups      RoommateGroup[]
   groupMemberships GroupMember[]
   sentInvitations  GroupInvitation[]
@@ -57,6 +62,34 @@ model Session {
 
   @@index([expire], map: "IDX_session_expire")
   @@map("session")
+}
+
+// ---------------------------------------------------------------------------
+// Admin account decisions (roadmap A1). Logic lives in src/services/admin.service.js.
+// ---------------------------------------------------------------------------
+
+enum AccountEventType {
+  LANDLORD_APPROVED
+  LANDLORD_REJECTED
+  PROMOTED_TO_ADMIN
+}
+
+/// Append-only audit log: which admin changed whose account, and when.
+model AccountEvent {
+  id           String           @id @default(uuid()) @db.Uuid
+  actorId      String           @map("actor_id") @db.Uuid
+  targetUserId String           @map("target_user_id") @db.Uuid
+  type         AccountEventType
+  comment      String? // optional reason, e.g. why a landlord was rejected
+  detail       Json? // e.g. { "fromRole": "STUDENT" }
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  actor  User @relation("AccountEventActor", fields: [actorId], references: [id])
+  target User @relation("AccountEventTarget", fields: [targetUserId], references: [id])
+
+  @@index([targetUserId, createdAt])
+  @@index([createdAt])
+  @@map("account_events")
 }
 
 // ---------------------------------------------------------------------------

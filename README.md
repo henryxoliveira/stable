@@ -5,7 +5,7 @@
 A horse's home is its stable. The name is a nod to the SCU Broncos.
 
 - **Public URL:** TODO (Cloud Run URL after first deploy)
-- **Status:** authentication, roommate groups, and the cost calculator are built. Other features are being built in PRs (see [Roadmap](#roadmap)).
+- **Status:** authentication, roommate groups, the cost calculator, and admin landlord approval are built. Other features are being built in PRs (see [Roadmap](#roadmap)).
 
 > Stable is a student class prototype. It is **not** affiliated with or endorsed by SCU Housing, does not
 > connect to any SCU system, and uses team-seeded listing data (nothing is scraped from Zillow,
@@ -64,7 +64,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Server-side sessions in Postgres; login required for everything but the allow-list    | ✅     |
 | Role and account-status checks; record-ownership helper                               | ✅     |
 | First-admin seed script (idempotent)                                                  | ✅     |
-| Admin: approve or reject landlord accounts; promote admins                            | ⬜     |
+| Admin: approve or reject landlord accounts; promote admins                            | ✅     |
 | Landlord: properties, units, floor plans; listing approval workflow                   | ⬜     |
 | Floor plan and photo uploads to Google Cloud Storage                                  | ⬜     |
 | Interactive map (Leaflet + OpenStreetMap), with price, units, and floor plans per pin | ⬜     |
@@ -98,6 +98,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Can't self-register as admin             | zod enum in `src/validation/auth.schemas.js` **and** a guard in `src/services/auth.service.js`  |
 | Unapproved listings hidden from students | Prisma `where` filter in the listing service (TODO)                                             |
 | Group page/actions: member or invitee    | `loadAccess()` in `src/services/group.service.js` (404 for anyone else; admins may view)        |
+| Approve/reject landlords; promote admins | `requireRole('ADMIN')`; `src/services/admin.service.js` re-checks the status inside the UPDATE  |
 | Group owner-only actions                 | `requireOwner()` in `src/services/group.service.js` (403 for members and invitees)              |
 | Cost estimate: only its owner            | every query in `src/services/costEstimate.service.js` filters by `userId` (404 for anyone else) |
 
@@ -288,7 +289,17 @@ the first admin exist?
 3. The script is **idempotent**. If that email already belongs to an admin, it changes nothing (it doesn't
    even reset the password). If the email belongs to a non-admin, it refuses and exits with an error rather
    than silently promoting someone.
-4. From then on, admins approve landlords and can promote other users to admin from inside the app (TODO).
+4. From then on, admins work from **Accounts** (`/admin/accounts`, linked from the admin dashboard):
+   - **Approve** a pending landlord: `PENDING → ACTIVE`. They can publish listings on their next request,
+     without logging in again (`loadUser` re-reads the account every request).
+   - **Reject** a pending landlord, with an optional reason: `PENDING → REJECTED`. A rejected landlord can't
+     log in, and any session they still have is dropped on their next request.
+   - **Promote** an active student or landlord to admin by email. Pending, suspended, and rejected accounts
+     can't be promoted, so an unapproved landlord can't skip the queue.
+   - Each decision is one transaction: an `UPDATE … WHERE status = 'PENDING'` (or `role`/`status` for
+     promotion) plus an `account_events` audit row. If two admins decide the same landlord at once, the
+     second update matches no rows and gets `409 NOT_PENDING`, so only one decision is ever recorded.
+   - Code: `src/services/admin.service.js`, `src/controllers/admin.controller.js`, `src/views/admin/accounts.ejs`.
 
 ## Architecture
 
@@ -385,12 +396,14 @@ the group. An offer stores `offerExpiresAt`.
 
 ## Data model
 
-**Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init`, `20261110030323_roommate_groups`, and `20261124073118_cost_estimates`):
+**Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init`, `20261110030323_roommate_groups`,
+`20261124073118_cost_estimates`, and `20261125024115_admin_account_decisions`):
 
-| Table     | Columns                                                                                                                                                                 | Notes                        |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `users`   | `id` (uuid), `email` (unique, lowercased), `password_hash` (argon2id), `role` (STUDENT/LANDLORD/ADMIN), `status` (ACTIVE/PENDING/SUSPENDED), `created_at`, `updated_at` |                              |
-| `session` | `sid`, `sess` (json), `expire`                                                                                                                                          | Managed by connect-pg-simple |
+| Table            | Columns                                                                                                                                                                          | Notes                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `users`          | `id` (uuid), `email` (unique, lowercased), `password_hash` (argon2id), `role` (STUDENT/LANDLORD/ADMIN), `status` (ACTIVE/PENDING/SUSPENDED/REJECTED), `created_at`, `updated_at` |                                          |
+| `account_events` | `id`, `actor_id` → users (the admin), `target_user_id` → users, `type` (LANDLORD_APPROVED, LANDLORD_REJECTED, PROMOTED_TO_ADMIN), `comment`, `detail` (jsonb), `created_at`      | Append-only audit log of admin decisions |
+| `session`        | `sid`, `sess` (json), `expire`                                                                                                                                                   | Managed by connect-pg-simple             |
 
 | Table               | Columns                                                                                                                                                                                            | Notes                                                                                |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -407,6 +420,8 @@ erDiagram
     roommate_groups ||--o{ group_invitations : "invites (by email)"
     roommate_groups ||--o{ group_events : "audit log"
     users ||--o{ group_events : "actor"
+    users ||--o{ account_events : "admin decided"
+    users ||--o{ account_events : "decision about"
 ```
 
 | Table            | Columns                                                                                                                                                                                                                                                                             | Notes                                                                                                         |
@@ -679,6 +694,20 @@ browser with its own cookies.
 | 71  | Offer deadline: 1 ms before, exactly at, and 1 ms after                                                       | unit test        | accept works only before it; at the deadline it's expired                                                                           | ✅ pass (automated)         |
 | 72  | Accept or expire an offer without passing the deadline                                                        | unit test        | refused (`MISSING_DEADLINE`), so the check can't be skipped                                                                         | ✅ pass (automated)         |
 | 73  | Group size vs. unit: equal, one too many, beds vs. bedrooms, 1 and 16 people, bad sizes                       | unit test        | fits only when size ≤ beds (or bedrooms if no beds)                                                                                 | ✅ pass (automated)         |
+| 74  | Landlord registers; admin sees them in the queue (students never do)                                          | L, S, admin      | listed on the page, API, and dashboard count; no hash in JSON                                                                       | ✅ pass (automated)         |
+| 75  | Admin approves; the landlord's existing session submits a listing                                             | L, admin         | ACTIVE; 403 `ACCOUNT_PENDING` → 501 stub; 1 audit event                                                                             | ✅ pass (automated)         |
+| 76  | Admin rejects with a reason                                                                                   | L, admin         | REJECTED; session 401; login 401; reason saved and shown                                                                            | ✅ pass (automated)         |
+| 77  | Reject with a blank reason                                                                                    | L, admin         | saved as no reason (`null`)                                                                                                         | ✅ pass (automated)         |
+| 78  | Approve, then reject or approve again                                                                         | L, admin         | 409 `NOT_PENDING`; still ACTIVE; 1 audit event                                                                                      | ✅ pass (automated)         |
+| 79  | Race ×5: two admins approve and reject the same landlord at once                                              | 2 admins         | one 200, one 409; status matches the winner; 1 audit event                                                                          | ✅ pass (automated)         |
+| 80  | Approve a student, reject an unknown id, malformed id                                                         | admin            | 404 / 404 / 400; nothing changes                                                                                                    | ✅ pass (automated)         |
+| 81  | Reject reason over 500 characters (HTML form)                                                                 | admin            | 400, error shown on the page; still PENDING                                                                                         | ✅ pass (automated)         |
+| 82  | Promote a student (form, email typed with spaces and capitals)                                                | S, admin         | ADMIN; their open session gets the admin dashboard (200)                                                                            | ✅ pass (automated)         |
+| 83  | Promote an approved landlord                                                                                  | admin            | ADMIN; audit `detail.fromRole = LANDLORD`                                                                                           | ✅ pass (automated)         |
+| 84  | Promote unknown email, an admin, a pending landlord, a suspended student                                      | admin            | 404 / 409 `ALREADY_ADMIN` / 409 / 409 `ACCOUNT_NOT_ACTIVE`                                                                          | ✅ pass (automated)         |
+| 85  | Promote form with a bad email, then an unknown one                                                            | admin            | 400 and 404, message on the page, typed email kept                                                                                  | ✅ pass (automated)         |
+| 86  | Student, pending landlord (on themselves), approved landlord use any admin route                              | S, L, L2         | 403 on every page, API, and action; no changes or events                                                                            | ✅ pass (automated)         |
+| 87  | Anonymous admin page / API; admin POST without a CSRF token                                                   | anonymous, admin | 302 → `/login` / 401; 403 and nothing changes                                                                                       | ✅ pass (automated)         |
 
 Latest run (local, 2026-11-24): **212 tests, 10 files, all passing.**
 
@@ -715,6 +744,8 @@ when Prisma 6.x or ESLint ship patched releases.
   verification would fix this.
 - Invitations are in-app only: no email is sent, so the owner has to tell the person to log in or register.
 - A student can be invited to several groups for the same term, but can join only one (the others get 409 on accept).
+- A rejected landlord can't register again with the same email (409), and there is no "undo" for a
+  rejection or a promotion in the app yet. An operator would fix those in the database.
 - TODO: add more as features land.
 
 ## Team contributions
@@ -753,7 +784,7 @@ the application state machine, offers, and the cost calculator.
 
 | Member A                                                                       | Member B                                                                             |
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| A1. Admin: list pending landlords; approve or reject; promote to admin         | ✅ B1. Schema + service: roommate groups per term, invites, accept/decline, "ready"  |
+| ✅ A1. Admin: list pending landlords; approve or reject; promote to admin      | ✅ B1. Schema + service: roommate groups per term, invites, accept/decline, "ready"  |
 | A2. Properties, units, floor plans (CRUD with ownership + tests)               | ✅ B2. Cost calculator service + page (cents, rent split, on- vs. off-campus)        |
 | A3. Listing state machine + admin review queue with comments                   | B3. Application schema + state machine + `application_events`                        |
 | A4. GCS uploads (multer memory, type/size checks) for floor plans and photos   | B4. Landlord review actions: docs requested, under review, offer with deadline       |
