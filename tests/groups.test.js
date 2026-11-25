@@ -6,7 +6,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createUser, prisma, resetDb } from './helpers/db.js';
 import { getCsrfToken, login, newAgent, postForm, postJson, register } from './helpers/http.js';
-import { MAX_GROUP_SEATS, upcomingTerms } from '../src/services/group.service.js';
+import {
+  MAX_GROUP_SEATS,
+  createGroup as createGroupDirect,
+  inviteByEmail as inviteDirect,
+  upcomingTerms,
+} from '../src/services/group.service.js';
 
 beforeEach(resetDb);
 
@@ -300,6 +305,180 @@ describe('one group per student per term', () => {
     const benId = await userId('ben@scu.edu');
     expect(await prisma.groupMember.count({ where: { userId: benId, term: TERM } })).toBe(1);
   });
+});
+
+describe('accept vs. cancel / disband (ordering and races)', () => {
+  // --- Deterministic orders (one request strictly after the other) ---
+
+  it('accept, then the owner cancels the same invite: 409 and the membership stays', async () => {
+    const amy = await student('amy@scu.edu');
+    const ben = await student('ben@scu.edu');
+    const groupId = await createGroup(amy);
+    await invite(amy, groupId, 'ben@scu.edu');
+    const inviteId = (await detail(amy, groupId)).pendingInvites[0].id;
+
+    expect((await postJson(ben, `/invites/${inviteId}/accept`)).status).toBe(200);
+    const cancel = await postJson(amy, `/groups/${groupId}/invites/${inviteId}/cancel`);
+    expect(cancel.status).toBe(409);
+    expect(cancel.body.error.code).toBe('INVITE_NOT_PENDING');
+
+    const d = await detail(amy, groupId);
+    expect(d.members.map((m) => m.email)).toEqual(['amy@scu.edu', 'ben@scu.edu']);
+    expect(d.ready).toBe(true);
+    expect(await eventTypes(groupId)).not.toContain('INVITE_CANCELLED');
+  });
+
+  it('disband, then accept with the old invite id: 404 and no membership', async () => {
+    const amy = await student('amy@scu.edu');
+    const ben = await student('ben@scu.edu');
+    const groupId = await createGroup(amy);
+    await invite(amy, groupId, 'ben@scu.edu');
+    const inviteId = await myInviteId(ben, groupId); // captured before the disband
+
+    expect((await postJson(amy, `/groups/${groupId}/leave`)).body.disbanded).toBe(true);
+    expect((await postJson(ben, `/invites/${inviteId}/accept`)).status).toBe(404);
+
+    expect(await prisma.groupMember.count({ where: { groupId } })).toBe(0);
+    expect(await eventTypes(groupId)).not.toContain('INVITE_ACCEPTED');
+  });
+
+  // --- Races: both requests in flight at once, repeated so both orders get exercised ---
+  //
+  // Users register ONCE per test (argon2 is slow); each round only clears the
+  // group tables, creates a fresh group + invite through the service, and fires
+  // the two HTTP requests with Promise.all. The assertions hold whichever
+  // request wins; the outcome tally is printed so you can see both orders ran.
+  //
+  // Head start: accept runs two queries (lock user, read invite) before it reaches
+  // the group lock, while cancel/leave reach it after one, so with a plain
+  // Promise.all the owner wins almost every time. Delaying the owner's request by
+  // a rotating 0–120 ms keeps the requests overlapping but lets either side win.
+
+  const RACE_ROUNDS = 10;
+  const RACE_TIMEOUT_MS = 90_000;
+  const OWNER_DELAYS_MS = [0, 30, 60, 90, 120];
+  const ownerDelay = (round) => OWNER_DELAYS_MS[(round - 1) % OWNER_DELAYS_MS.length];
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /** Clear group data only (users and their sessions stay logged in). */
+  async function resetGroups() {
+    await prisma.groupEvent.deleteMany();
+    await prisma.groupInvitation.deleteMany();
+    await prisma.groupMember.deleteMany();
+    await prisma.roommateGroup.deleteMany();
+  }
+
+  async function raceSetup() {
+    const amy = await student('amy@scu.edu');
+    const ben = await student('ben@scu.edu');
+    const select = { id: true, email: true, role: true };
+    return {
+      amy,
+      ben,
+      // csrf-sync keeps one token per session, so it stays valid for every round.
+      amyToken: await getCsrfToken(amy, '/groups'),
+      benToken: await getCsrfToken(ben, '/groups'),
+      amyUser: await prisma.user.findUnique({ where: { email: 'amy@scu.edu' }, select }),
+    };
+  }
+
+  /** Fresh group owned by Amy with a pending invite for Ben. */
+  async function freshInvite(amyUser) {
+    await resetGroups();
+    const group = await createGroupDirect(amyUser, { name: 'Race', term: TERM });
+    const inv = await inviteDirect(amyUser, group.id, 'ben@scu.edu');
+    return { groupId: group.id, inviteId: inv.id };
+  }
+
+  const send = (agent, token, path) =>
+    agent.post(path).set('x-csrf-token', token).set('Accept', 'application/json');
+
+  it(
+    'race: accept vs. owner cancel, the invariants hold whichever commits first',
+    async () => {
+      const { amy, ben, amyToken, benToken, amyUser } = await raceSetup();
+      const tally = { acceptFirst: 0, cancelFirst: 0 };
+
+      for (let round = 1; round <= RACE_ROUNDS; round += 1) {
+        const { groupId, inviteId } = await freshInvite(amyUser);
+        const [acc, can] = await Promise.all([
+          send(ben, benToken, `/invites/${inviteId}/accept`),
+          sleep(ownerDelay(round)).then(() =>
+            send(amy, amyToken, `/groups/${groupId}/invites/${inviteId}/cancel`),
+          ),
+        ]);
+        const label = `round ${round} (+${ownerDelay(round)} ms): accept ${acc.status}, cancel ${can.status}`;
+
+        const members = await prisma.groupMember.count({ where: { groupId } });
+        const inv = await prisma.groupInvitation.findUnique({ where: { id: inviteId } });
+        const types = await eventTypes(groupId);
+        // Either way, nothing is left pending.
+        expect(await prisma.groupInvitation.count({ where: { status: 'PENDING' } }), label).toBe(0);
+
+        if (acc.status === 200) {
+          tally.acceptFirst += 1;
+          expect(can.status, label).toBe(409);
+          expect(can.body.error.code, label).toBe('INVITE_NOT_PENDING');
+          expect(members, label).toBe(2); // Amy + exactly one Ben
+          expect(inv.status, label).toBe('ACCEPTED');
+          expect(types, label).toContain('INVITE_ACCEPTED');
+          expect(types, label).not.toContain('INVITE_CANCELLED');
+        } else {
+          tally.cancelFirst += 1;
+          expect(acc.status, label).toBe(404);
+          expect(can.status, label).toBe(200);
+          expect(members, label).toBe(1); // only Amy
+          expect(inv.status, label).toBe('CANCELLED');
+          expect(types, label).not.toContain('INVITE_ACCEPTED');
+        }
+      }
+      console.info(`accept vs. cancel, ${RACE_ROUNDS} rounds:`, tally);
+    },
+    RACE_TIMEOUT_MS,
+  );
+
+  it(
+    'race: accept vs. sole owner leaving (disband), the invariants hold whichever commits first',
+    async () => {
+      const { amy, ben, amyToken, benToken, amyUser } = await raceSetup();
+      const tally = { acceptFirst: 0, disbandFirst: 0 };
+
+      for (let round = 1; round <= RACE_ROUNDS; round += 1) {
+        const { groupId, inviteId } = await freshInvite(amyUser);
+        const [acc, leave] = await Promise.all([
+          send(ben, benToken, `/invites/${inviteId}/accept`),
+          sleep(ownerDelay(round)).then(() => send(amy, amyToken, `/groups/${groupId}/leave`)),
+        ]);
+        const label = `round ${round} (+${ownerDelay(round)} ms): accept ${acc.status}, leave ${leave.status}`;
+
+        const group = await prisma.roommateGroup.findUnique({ where: { id: groupId } });
+        const members = await prisma.groupMember.count({ where: { groupId } });
+        const inv = await prisma.groupInvitation.findUnique({ where: { id: inviteId } });
+        const types = await eventTypes(groupId);
+
+        if (acc.status === 200) {
+          tally.acceptFirst += 1;
+          expect(leave.status, label).toBe(409);
+          expect(leave.body.error.code, label).toBe('TRANSFER_OWNERSHIP_FIRST');
+          expect(group.status, label).toBe('ACTIVE');
+          expect(group.ownerId, label).toBe(amyUser.id);
+          expect(members, label).toBe(2);
+          expect(types, label).not.toContain('DISBANDED');
+        } else {
+          tally.disbandFirst += 1;
+          expect(acc.status, label).toBe(404);
+          expect(leave.status, label).toBe(200);
+          expect(leave.body.disbanded, label).toBe(true);
+          expect(group.status, label).toBe('DISBANDED');
+          expect(members, label).toBe(0);
+          expect(inv.status, label).toBe('CANCELLED');
+          expect(types, label).not.toContain('INVITE_ACCEPTED');
+        }
+      }
+      console.info(`accept vs. disband, ${RACE_ROUNDS} rounds:`, tally);
+    },
+    RACE_TIMEOUT_MS,
+  );
 });
 
 describe('authorization', () => {
