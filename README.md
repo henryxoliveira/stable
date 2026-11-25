@@ -491,6 +491,7 @@ gcloud run deploy stable --image $IMAGE --region REGION --service-account $SA \
 After deploying, verify the public health endpoint on the service URL:
 
 ```bash
+SERVICE_URL=$(gcloud run services describe stable --region REGION --format='value(status.url)')
 curl --fail-with-body "$SERVICE_URL/health"
 # Expected: {"status":"ok"} with HTTP 200, without login or a session cookie.
 ```
