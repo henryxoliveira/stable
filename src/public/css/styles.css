@@ -205,6 +205,19 @@ a.btn {
 .badge.ready {
   background: var(--hay);
 }
+/* Property, unit, and floor plan forms (number fields and long text). */
+.card input[type='number'],
+.card textarea {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #c9c4b8;
+  border-radius: 6px;
+  font: inherit;
+}
+.unit + .unit {
+  border-top: 1px solid #ece6d9;
+  margin-top: 1rem;
+}
 .history {
   padding-left: 1.25rem;
 }

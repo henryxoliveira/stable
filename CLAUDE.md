@@ -89,7 +89,8 @@ tests/              # *.test.js + helpers/ (db reset, CSRF-aware Supertest agent
   Never select `passwordHash` into views or JSON.
 - DB naming: Prisma models in PascalCase, tables/columns snake_case via `@@map`/`@map`. UUID ids.
 - Every state change in a workflow writes an `application_events` (or similar audit) row: who, what, when, comment.
-- Money in integer **cents**. Distances in miles computed server-side (haversine) from stored lat/lng.
+- Money in integer **cents** (parse typed dollars with `src/utils/money.js`). Distances in miles computed
+  server-side (haversine) from stored lat/lng.
 - Tests: each `newAgent()` is a separate browser. Use helpers in `tests/helpers/http.js` (they fetch CSRF tokens).
 
 ## Roles

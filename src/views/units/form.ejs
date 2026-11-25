@@ -1,0 +1,44 @@
+<%- include('../partials/header', { title: unit ? 'Edit unit' : 'Add a unit' }) %>
+<p><a href="/properties/<%= property.id %>">← <%= property.name %></a></p>
+<h1><%= unit ? 'Edit ' + unit.label : 'Add a unit to ' + property.name %></h1>
+<% if (errors._form) { %><p class="alert" role="alert"><%= errors._form %></p><% } %>
+
+<form method="post" action="<%= unit ? '/units/' + unit.id : '/properties/' + property.id + '/units' %>" class="card" novalidate>
+  <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+
+  <label for="label">Unit label</label>
+  <input id="label" name="label" type="text" maxlength="40" required placeholder="e.g. Unit 2B, or Whole house" value="<%= values.label || '' %>">
+  <%- include('../partials/field-error', { field: 'label' }) %>
+
+  <label for="bedrooms">Bedrooms (0 for a studio)</label>
+  <input id="bedrooms" name="bedrooms" type="number" min="0" max="20" step="1" required value="<%= values.bedrooms ?? '' %>">
+  <%- include('../partials/field-error', { field: 'bedrooms' }) %>
+
+  <label for="beds">Beds (how many people it fits, up to 16)</label>
+  <input id="beds" name="beds" type="number" min="1" max="16" step="1" required value="<%= values.beds ?? '' %>">
+  <%- include('../partials/field-error', { field: 'beds' }) %>
+
+  <label for="bathrooms">Bathrooms</label>
+  <input id="bathrooms" name="bathrooms" type="number" min="0" max="10" step="0.5" required value="<%= values.bathrooms ?? '' %>">
+  <%- include('../partials/field-error', { field: 'bathrooms' }) %>
+
+  <label for="squareFeet">Square feet (optional)</label>
+  <input id="squareFeet" name="squareFeet" type="number" min="1" step="1" value="<%= values.squareFeet ?? '' %>">
+  <%- include('../partials/field-error', { field: 'squareFeet' }) %>
+
+  <p class="muted">Amounts are per month for the whole unit. Type them like 2400 or $2,400.50.</p>
+  <label for="rent">Rent</label>
+  <input id="rent" name="rent" type="text" inputmode="decimal" required value="<%= values.rent || '' %>">
+  <%- include('../partials/field-error', { field: 'rent' }) %>
+
+  <label for="utilities">Utilities</label>
+  <input id="utilities" name="utilities" type="text" inputmode="decimal" value="<%= values.utilities || '' %>">
+  <%- include('../partials/field-error', { field: 'utilities' }) %>
+
+  <label for="parking">Parking</label>
+  <input id="parking" name="parking" type="text" inputmode="decimal" value="<%= values.parking || '' %>">
+  <%- include('../partials/field-error', { field: 'parking' }) %>
+
+  <button type="submit" class="btn"><%= unit ? 'Save changes' : 'Add unit' %></button>
+</form>
+<%- include('../partials/footer') %>
