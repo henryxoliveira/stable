@@ -3,7 +3,13 @@
 <p class="muted">Enter what a place costs each month. Stable splits it between your roommates, down to
   the cent, and can compare it with living on campus. Your estimates are private to you.</p>
 
+<p><a href="/costs/compare">Compare estimates</a> · <a href="/leases">Lease summary (AI)</a></p>
+
 <% if (errors._form) { %><p class="alert" role="alert"><%= errors._form %></p><% } %>
+<% if (locals.fromLease) { %>
+  <p class="alert" role="status">Filled in from your lease summary (<%= fromLease.originalFilename %>).
+    Check every number before saving. Blank fields weren't stated in the lease.</p>
+<% } %>
 
 <section class="card">
   <h2>My estimates</h2>

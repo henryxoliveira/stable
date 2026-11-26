@@ -85,3 +85,45 @@ export const createEstimateSchema = z
   }));
 
 export const estimateIdParams = z.object({ id: z.uuid() });
+
+/** GET /costs?fromLease=<id>: pre-fill the form from one of my lease summaries. */
+export const costsIndexQuery = z.object({
+  fromLease: z.preprocess(blankToUndefined, z.uuid({ error: 'Unknown lease.' }).optional()),
+});
+
+export const MIN_COMPARE = 2;
+export const MAX_COMPARE = 8;
+
+/**
+ * GET /costs/compare?ids=a&ids=b&people=3. With no ids, the page just shows the
+ * picker. A single ?ids=x arrives as a string, so it is wrapped in an array.
+ */
+export const compareQuery = z
+  .object({
+    ids: z.preprocess(
+      (value) => (value === undefined || value === '' ? [] : [value].flat()),
+      z
+        .array(z.uuid({ error: 'Pick estimates from your list.' }))
+        .max(MAX_COMPARE, { error: `Pick at most ${MAX_COMPARE} estimates.` }),
+    ),
+    people: z.preprocess(
+      blankToUndefined,
+      wholeNumber({
+        min: 1,
+        max: MAX_GROUP_SEATS,
+        message: `Enter a whole number of people from 1 to ${MAX_GROUP_SEATS}.`,
+      }).default(2),
+    ),
+  })
+  .superRefine(({ ids }, ctx) => {
+    if (ids.length > 0 && ids.length < MIN_COMPARE) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ids'],
+        message: `Pick at least ${MIN_COMPARE} estimates.`,
+      });
+    }
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: 'custom', path: ['ids'], message: 'Pick each estimate only once.' });
+    }
+  });

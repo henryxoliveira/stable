@@ -24,6 +24,12 @@ const schema = z.object({
     : z.string().default('dev-only-insecure-session-secret-change-me'),
   ALLOWED_STUDENT_EMAIL_DOMAIN: z.string().default('scu.edu'),
   GCS_BUCKET: z.string().optional(),
+  // Optional. Without it the AI lease summary is turned off and everything else works.
+  // An empty value counts as "not set".
+  ANTHROPIC_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => (value && value.trim() ? value.trim() : undefined)),
 });
 
 // In tests we always talk to the separate test database, never the dev/prod one.

@@ -47,7 +47,7 @@
     <h2>Linked roommate group</h2>
     <% if (estimate.linkedGroup.available) { %>
       <p><a href="/groups/<%= estimate.linkedGroup.id %>"><%= estimate.linkedGroup.name %></a> ·
-        <%= estimate.linkedGroup.term %> · <%= estimate.linkedGroup.memberCount %> members now</p>
+        <%= estimate.linkedGroup.term %> · <%= estimate.linkedGroup.memberCount %> <%= estimate.linkedGroup.memberCount === 1 ? 'member' : 'members' %> now</p>
     <% } else { %>
       <p class="muted">Linked group no longer available.</p>
     <% } %>

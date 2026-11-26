@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import * as auth from '../controllers/auth.controller.js';
 import * as costs from '../controllers/costs.controller.js';
+import * as leases from '../controllers/leases.controller.js';
 import * as dashboard from '../controllers/dashboard.controller.js';
 import * as groups from '../controllers/groups.controller.js';
 import * as listings from '../controllers/listings.controller.js';
@@ -19,7 +20,15 @@ import {
   inviteSchema,
   transferSchema,
 } from '../validation/group.schemas.js';
-import { createEstimateSchema, estimateIdParams } from '../validation/cost.schemas.js';
+import {
+  compareQuery,
+  costsIndexQuery,
+  createEstimateSchema,
+  estimateIdParams,
+} from '../validation/cost.schemas.js';
+import { leaseIdParams } from '../validation/leaseTerms.schema.js';
+import { receiveLeaseUpload, requirePdf } from '../middleware/upload.js';
+import { leaseSummaryLimit } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -101,7 +110,14 @@ router.post(
 // so anyone else's estimate is a 404.
 const estimateId = validate(estimateIdParams, { source: 'params' });
 
-router.get('/costs', student, costs.index);
+router.get('/costs', student, validate(costsIndexQuery, { source: 'query' }), costs.index);
+// Before '/costs/:id', so "compare" isn't read as an estimate id.
+router.get(
+  '/costs/compare',
+  student,
+  validate(compareQuery, { source: 'query', view: costs.compareInvalid }),
+  costs.compare,
+);
 router.get('/api/costs', student, costs.apiIndex);
 router.post(
   '/costs',
@@ -112,5 +128,24 @@ router.post(
 router.get('/costs/:id', student, estimateId, costs.show);
 router.get('/api/costs/:id', student, estimateId, costs.apiShow);
 router.post('/costs/:id/delete', student, estimateId, costs.remove);
+
+// AI lease summaries. Students only; each student sees only their own summaries
+// (the service filters by user id, so anyone else's is a 404). Upload order:
+// AI on? → read the file into memory (≤ 5 MB) → really a PDF? → rate limit → AI.
+const leaseId = validate(leaseIdParams, { source: 'params' });
+
+router.get('/leases', student, leases.index);
+router.post(
+  '/leases',
+  student,
+  leases.requireAiEnabled,
+  receiveLeaseUpload,
+  requirePdf,
+  leaseSummaryLimit,
+  leases.create,
+);
+router.get('/leases/:id', student, leaseId, leases.show);
+router.get('/api/leases/:id', student, leaseId, leases.apiShow);
+router.post('/leases/:id/delete', student, leaseId, leases.remove);
 
 export default router;

@@ -115,3 +115,41 @@ export function formatCents(cents) {
   const rest = String(abs % 100).padStart(2, '0');
   return `${sign}$${dollars}.${rest}`;
 }
+
+/**
+ * Compare saved estimates side by side for the same number of people.
+ * For each one: the monthly total, the per-person monthly cost (the LARGEST share,
+ * i.e. the most anyone pays), and that times the lease length.
+ * The cheapest per-person monthly cost is highlighted; the lowest lease total is
+ * also marked, because leases of different lengths can disagree on "cheapest".
+ * Ties are all marked.
+ * @param {{ id: string, name: string, rentCents: number, utilitiesCents: number,
+ *   parkingCents: number, leaseMonths: number }[]} estimates  at least one
+ * @param {number} people  1..MAX_GROUP_SEATS, used for EVERY estimate
+ */
+export function compareEstimates(estimates, people) {
+  if (!Array.isArray(estimates) || estimates.length === 0) {
+    throw new RangeError('Pick at least one estimate to compare.');
+  }
+  const rows = estimates.map((e) => {
+    const monthlyTotalCents = e.rentCents + e.utilitiesCents + e.parkingCents;
+    const perPersonMonthlyCents = splitCents(monthlyTotalCents, people).shares[0];
+    return {
+      id: e.id,
+      name: e.name,
+      leaseMonths: e.leaseMonths,
+      monthlyTotalCents,
+      perPersonMonthlyCents,
+      perPersonLeaseTotalCents: perPersonMonthlyCents * e.leaseMonths,
+    };
+  });
+  const lowestMonthly = Math.min(...rows.map((r) => r.perPersonMonthlyCents));
+  const lowestLease = Math.min(...rows.map((r) => r.perPersonLeaseTotalCents));
+  for (const r of rows) {
+    r.cheapestMonthly = r.perPersonMonthlyCents === lowestMonthly;
+    r.lowestLeaseTotal = r.perPersonLeaseTotalCents === lowestLease;
+  }
+  // Only call out the lease total separately when it picks different estimates.
+  const leaseTotalDiffers = rows.some((r) => r.cheapestMonthly !== r.lowestLeaseTotal);
+  return { people, rows, leaseTotalDiffers };
+}

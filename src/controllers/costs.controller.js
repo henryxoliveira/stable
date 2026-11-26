@@ -4,27 +4,70 @@
  */
 import * as estimates from '../services/costEstimate.service.js';
 import { listMyGroups } from '../services/group.service.js';
-import { formatCents } from '../services/cost.service.js';
+import { compareEstimates, formatCents } from '../services/cost.service.js';
+import { getMySummary, prefillFromLease } from '../services/leaseSummary.service.js';
 import { HttpError, notFound } from '../utils/httpError.js';
 import { wantsJson } from '../utils/request.js';
 
 /** The list + create form. Also used to re-render the form after a 400. */
-async function renderIndex(req, res, { status = 200, errors = {}, values = {} } = {}) {
+async function renderIndex(
+  req,
+  res,
+  { status = 200, errors = {}, values = {}, fromLease = null } = {},
+) {
   const [list, { groups }] = await Promise.all([
     estimates.listMyEstimates(req.user),
     listMyGroups(req.user),
   ]);
   res
     .status(status)
-    .render('costs/index', { estimates: list, groups, errors, values, formatCents });
+    .render('costs/index', { estimates: list, groups, errors, values, formatCents, fromLease });
 }
 
 /** `validate()` hook: show field errors on the form instead of an error page. */
 export const createInvalid = (req, res, { errors, values }) =>
   renderIndex(req, res, { status: 400, errors, values });
 
-/** GET /costs */
-export const index = (req, res) => renderIndex(req, res);
+/**
+ * GET /costs, optionally ?fromLease=<id>: the form PRE-FILLED from one of my lease
+ * summaries (404 if it isn't mine). Nothing is saved until the student submits.
+ */
+export async function index(req, res) {
+  if (!req.valid?.fromLease) return renderIndex(req, res);
+  const summary = await getMySummary(req.user, req.valid.fromLease);
+  if (!summary) throw notFound();
+  return renderIndex(req, res, { values: prefillFromLease(summary), fromLease: summary });
+}
+
+/**
+ * GET /costs/compare?ids=…&people=N: my estimates side by side. Any id that isn't
+ * mine is a 404 (without saying which).
+ */
+export async function compare(req, res) {
+  const { ids, people } = req.valid;
+  let comparison = null;
+  if (ids.length > 0) {
+    const picked = await estimates.getMyEstimatesByIds(req.user, ids);
+    if (!picked) throw notFound();
+    comparison = compareEstimates(picked, people);
+  }
+  if (wantsJson(req)) return res.json({ comparison });
+  const list = await estimates.listMyEstimates(req.user);
+  res.render('costs/compare', { estimates: list, comparison, ids, people, formatCents });
+}
+
+/** `validate()` hook for the compare page: show the message above the picker. */
+export async function compareInvalid(req, res, { errors }) {
+  const list = await estimates.listMyEstimates(req.user);
+  res.status(400).render('costs/compare', {
+    estimates: list,
+    comparison: null,
+    ids: [],
+    people: 2,
+    errors,
+    formatCents,
+  });
+}
 
 /** GET /api/costs */
 export async function apiIndex(req, res) {
