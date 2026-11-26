@@ -1,0 +1,16 @@
+<%- include('../partials/header', { title: 'My applications' }) %>
+<h1>My group's applications</h1>
+<% if (applications.length === 0) { %>
+  <section class="card"><p class="muted">Your groups haven't applied anywhere yet.</p></section>
+<% } %>
+<% applications.forEach((application) => { %>
+  <section class="card">
+    <h2><a href="/applications/<%= application.id %>"><%= application.unit.propertyName %>, <%= application.unit.label %></a>
+      <span class="badge"><%= application.statusLabel %></span></h2>
+    <p class="muted"><%= application.group.name %> · <%= application.group.term %>
+      <% if (application.status === 'OFFERED') { %> · offer open until <%= formatPacific(application.offerExpiresAt) %><% } %></p>
+    <%- include('_actions', { application }) %>
+    <%- include('_history', { application }) %>
+  </section>
+<% }) %>
+<%- include('../partials/footer') %>

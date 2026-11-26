@@ -1,0 +1,15 @@
+<%- include('../partials/header', { title: 'Application' }) %>
+<p><a href="<%= application.viewer.role === 'LISTING_OWNER' ? '/units/' + application.unit.id + '/applications' : application.viewer.role === 'ADMIN' ? '/dashboard/admin' : '/applications' %>">← Back</a></p>
+<h1><%= application.unit.propertyName %>, <%= application.unit.label %></h1>
+<section class="card">
+  <p><strong>Status:</strong> <span class="badge"><%= application.statusLabel %></span>
+    <% if (application.status === 'OFFERED') { %> · offer open until <strong><%= formatPacific(application.offerExpiresAt) %></strong><% } %></p>
+  <p><strong>Group:</strong> <%= application.group.name %> (<%= application.group.term %>, <%= application.groupSize %> <%= application.groupSize === 1 ? 'person' : 'people' %> when they applied)</p>
+  <p class="muted">Members: <%= application.group.members.join(', ') %></p>
+  <%- include('_actions', { application }) %>
+</section>
+<section class="card">
+  <h2>History</h2>
+  <%- include('_history', { application }) %>
+</section>
+<%- include('../partials/footer') %>

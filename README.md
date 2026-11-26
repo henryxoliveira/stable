@@ -71,7 +71,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Search filters: price per person, distance to campus (haversine), bedrooms            | ⬜     |
 | Saved listings                                                                        | ⬜     |
 | Roommate groups per term (invite by email, accept, decline, transfer, leave, history) | ✅     |
-| Group application lifecycle, document requests, offers with deadlines                 | ⬜     |
+| Group application lifecycle, document requests, offers with deadlines                 | ✅     |
 | Offer acceptance with row locking; competing applications auto-closed                 | ⬜     |
 | Cost calculator: per-person rent, utilities, and parking, on- vs. off-campus          | ✅     |
 | Student subleases (same approval and application flow)                                | ⬜     |
@@ -246,8 +246,8 @@ stateDiagram-v2
 
 **Where these rules live.** The states, the allowed moves, and who may make each move are written down in one
 file: `src/services/application.workflow.js`. It has no database and doesn't read the clock (the current time is
-passed in), so every rule can be tested on its own. The database, pages, and buttons will use this file in the
-next B3 PR.
+passed in), so every rule can be tested on its own. `src/services/application.service.js` uses it for every status
+change: it adds the database, the locks, and the history, but never its own copy of the rules.
 
 - In the code, states are written in capitals (`DOCS_REQUESTED`). The diagram above uses lowercase to stay readable.
   Pages show friendly names such as "Documents requested".
@@ -377,25 +377,53 @@ middleware steps are already in place.
 8. `requireLogin`: everything after this needs a logged-in user (401 JSON or redirect to `/login`).
 9. Protected routes, then the 404 handler and the central error handler.
 
-**1. Student A submits an application** with `POST /api/listings/:listingId/applications { groupId, unitId }` (TODO):
+**1. Student A applies for the group** with `POST /api/units/:unitId/applications { groupId }` (the page form posts
+to `/units/:unitId/apply`). Listings don't exist yet (A3), so students apply to a unit by link for now:
 
 1. **Route:** `protected.routes.js` → `requireRole('STUDENT')`.
-2. **Validation:** `validate(applySchema)` checks the UUIDs with zod. Bad input gets a 400 `VALIDATION_ERROR`.
-3. **Controller:** passes `req.user` and `req.valid` to `applicationService.submit()`.
-4. **Authorization (service):** loads the group and checks that the user is an accepted member (otherwise 404).
-   Loads the unit through an _approved_ listing (otherwise 404).
-5. **Business rules:** the group is ready (all members accepted), group size ≤ unit capacity, the unit is available,
-   and there's no other active application from this group for this unit. A failure returns 409 with a specific code.
-6. **Transaction:** inserts the `applications` row (`submitted`) and the `application_events` row
-   (`actor=A, from=null, to=submitted`), plus a notification for the listing owner.
+2. **Validation:** `validate(unitIdParams)` and `validate(applyBody)` check the ids with zod. Bad input gets a 400
+   `VALIDATION_ERROR`.
+3. **Controller:** `applications.controller.js` passes `req.user` and `req.valid` to `applicationService.apply()`.
+4. **Transaction, with locks in a fixed order (group row, then unit row):**
+   - Lock the group row and check that the student is an accepted member (otherwise 404). Two members clicking
+     "apply" at the same moment run one after the other, so only one application is created.
+   - Lock the unit row, so the unit can't be marked leased halfway through.
+   - The unit's landlord must be ACTIVE (otherwise 404). _TODO (A3): require an approved listing instead._
+5. **Business rules**, each failure a 409 with its own code: the group is ready (`isReady`: nobody still invited),
+   it fits the unit (`groupFitsUnit`: beds, or bedrooms), the unit is AVAILABLE, and the group has no other open
+   application for this unit. `canTransition(null, SUBMITTED, GROUP_MEMBER)` must agree.
+6. **Writes:** the `applications` row (`SUBMITTED`, with the group size that was checked) and its first
+   `application_events` row (`actor = A, from = null, to = SUBMITTED`), in the same transaction.
 7. **Response:** 201 with the application JSON.
 
-**2. The landlord requests documents, reviews, and makes an offer** (TODO): each action is `POST /api/applications/:id/<action>`.
-The service loads the application, checks that `listing.ownerId === req.user.id` (otherwise 404), checks that
-the transition is legal for the current state (otherwise 409), updates the state, writes an event, and notifies
-the group. An offer stores `offerExpiresAt`.
+**2. The landlord and the group move it along**, each with `POST /api/applications/:id/<move>` (or the buttons on
+the pages, which come from `allowedMoves()`):
 
-**3. Student B (same group) accepts** with `POST /api/applications/:id/accept` (TODO):
+| Move                | Who      | Notes                                                                      |
+| ------------------- | -------- | -------------------------------------------------------------------------- |
+| `request-documents` | landlord | Comment required (which documents)                                         |
+| `send-documents`    | group    | Comment required (e.g. "Sent pay stubs by email"); file upload comes later |
+| `start-review`      | landlord |                                                                            |
+| `offer`             | landlord | Deadline in the future, at most 14 days away; one open offer per unit      |
+| `rescind`           | landlord | Back to "Under review"                                                     |
+| `reject`            | landlord | Optional reason                                                            |
+| `withdraw`          | group    | Optional comment                                                           |
+| `decline`           | group    | Declines an offer; optional comment                                        |
+
+For each move the service: expires the offer first if its deadline has passed; locks the application row (for
+`offer`, the unit row first, then the application); checks who the user is (a group member, or the owner of the
+unit's property; anyone else gets 404, an admin gets 403); asks `canTransition()` (the wrong person gets 403, an
+illegal move 409 with the workflow's plain-English reason); then updates the status and writes the event in one
+transaction. Landlord moves need an ACTIVE account.
+
+**Offer expiry:** whenever applications are read, and before every move, an offer past its deadline becomes
+`EXPIRED` with a `SYSTEM` event. Exactly at the deadline counts as expired. The update only matches an offer that
+is still open, so two reads at the same moment write only one event.
+
+**3. Student B (same group) accepts** with `POST /api/applications/:id/accept` (TODO, B5). _Before marking the
+unit leased, accept must re-check the group's size and readiness (the group may have changed since applying).
+It locks the unit first; if it also needs the group row, it must lock the group **before** the unit, the same
+order as applying, or the two could deadlock._
 
 1. Authorization: the user is a member of the application's group (otherwise 404).
 2. `prisma.$transaction(async (tx) => { … })`:
@@ -413,7 +441,7 @@ the group. An offer stores `offerExpiresAt`.
 ## Data model
 
 **Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init`, `20261110030323_roommate_groups`,
-`20261124073118_cost_estimates`, and `20261125025154_properties_units_floor_plans`):
+`20261124073118_cost_estimates`, `20261125025154_properties_units_floor_plans`, and `20261126065226_applications`):
 
 | Table     | Columns                                                                                                                                                                 | Notes                        |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
@@ -465,6 +493,25 @@ erDiagram
     roommate_groups |o--o{ cost_estimates : "linked to (optional)"
 ```
 
+**Group applications** (migration `20261126065226_applications`):
+
+| Table                | Columns                                                                                                                                             | Notes                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `applications`       | `id`, `group_id` → roommate_groups, `unit_id` → units, `status`, `group_size`, `offer_expires_at`, `created_at`, `updated_at`                       | One group's application for one unit. An OFFERED application must have a deadline (CHECK). |
+| `application_events` | `id`, `application_id` → applications, `actor_id` → users (empty for the system), `actor_type`, `from_status`, `to_status`, `comment`, `created_at` | Append-only history: every status change, who made it, and why.                            |
+
+Statuses are the ones in Workflow C, written in capitals (`SUBMITTED`, `DOCS_REQUESTED`, …). `actor_type` is
+`GROUP_MEMBER`, `LISTING_OWNER`, or `SYSTEM` (an offer expiring). `group_size` is the number of accepted members when
+the group applied, which is the size checked against the unit.
+
+```mermaid
+erDiagram
+    roommate_groups ||--o{ applications : submits
+    units ||--o{ applications : "applied to"
+    applications ||--o{ application_events : "history"
+    users |o--o{ application_events : "made the move"
+```
+
 **Planned** (each one will arrive in a migration in the PR that needs it):
 
 ```mermaid
@@ -474,15 +521,11 @@ erDiagram
     listings ||--o{ listing_reviews : "admin comments"
     listings ||--o{ photos : has
     users ||--o{ saved_listings : saves
-    roommate_groups ||--o{ applications : submits
-    units ||--o{ applications : "applied to"
-    applications ||--o{ application_events : "audit log"
     applications ||--o{ application_documents : has
     users ||--o{ notifications : receives
 ```
 
-Key fields (planned): `listings(status, kind off_campus|on_campus|sublease, owner_id)`,
-`applications(status, offer_expires_at)`, `application_events(actor_id, from_status, to_status, comment, created_at)`.
+Key fields (planned): `listings(status, kind off_campus|on_campus|sublease, owner_id)`.
 Money is stored in integer cents.
 
 ## Local setup
@@ -726,8 +769,26 @@ browser with its own cookies.
 | 101 | Admin views all properties, then tries every edit                                                             | L, L2, admin     | 200 with owner email; 403 on every edit; nothing changes                                                                            | ✅ pass (automated)         |
 | 102 | Anonymous access; landlord POST without a CSRF token                                                          | anonymous, L     | 302 → `/login` / 401; 403 and nothing saved                                                                                         | ✅ pass (automated)         |
 | 103 | Money parser and formatter (`src/utils/money.js`)                                                             | unit test        | exact cents; bad input refused; `$2,400.50` formatting                                                                              | ✅ pass (automated)         |
+| 104 | Apply → request documents → send documents → review → offer → decline                                         | A, B, L          | each move works; 6 event rows with actor, from/to status, and comment                                                               | ✅ pass (automated)         |
+| 105 | Pages: the group's applications and history; the landlord's incoming list with buttons                        | A, L             | buttons match `allowedMoves()` for each person and status                                                                           | ✅ pass (automated)         |
+| 106 | Apply and reject through the HTML forms, then apply again                                                     | A, L             | redirects to the right page; a finished application doesn't block a new one                                                         | ✅ pass (automated)         |
+| 107 | Apply as a non-member; group not ready; group too big; unit leased                                            | S, A             | 404 / 409 `GROUP_NOT_READY` / 409 `GROUP_TOO_BIG` / 409 `UNIT_NOT_AVAILABLE`                                                        | ✅ pass (automated)         |
+| 108 | Apply to a pending landlord's unit or a missing unit                                                          | A                | 404                                                                                                                                 | ✅ pass (automated)         |
+| 109 | Apply twice for the same unit; withdraw; apply again                                                          | A, B             | 409 `ALREADY_APPLIED`, then 201                                                                                                     | ✅ pass (automated)         |
+| 110 | Race ×10: two members apply at the same moment                                                                | A, B             | exactly one 201 and one 409 each time; one application                                                                              | ✅ pass (automated)         |
+| 111 | Second offer on the same unit; rescind; offer again                                                           | L, C             | 409 `UNIT_HAS_OPEN_OFFER`, then the new offer works                                                                                 | ✅ pass (automated)         |
+| 112 | Offer deadline in the past, over 14 days, both or neither given, malformed                                    | L                | 400                                                                                                                                 | ✅ pass (automated)         |
+| 113 | Illegal moves (offer before review; "start review" on an offer)                                               | L                | 409 with the workflow's reason; nothing changes                                                                                     | ✅ pass (automated)         |
+| 114 | Offer expiry: 1 ms before, exactly at, and after the deadline                                                 | unit test        | expires exactly at the deadline; one `SYSTEM` event, only once                                                                      | ✅ pass (automated)         |
+| 115 | Past deadline, then four reads at the same moment; decline after it expired                                   | A, B, L          | `EXPIRED` with exactly one event; decline gets 409                                                                                  | ✅ pass (automated)         |
+| 116 | Outsider student and another landlord on someone else's application                                           | S, L2            | 404 on every page and move; nothing changes                                                                                         | ✅ pass (automated)         |
+| 117 | Student on landlord moves; landlord on group moves; wrong actor past the routes                               | A, L             | 403                                                                                                                                 | ✅ pass (automated)         |
+| 118 | Admin views and tries to act; pending landlord acts; logged-out visitor                                       | admin, P, anon   | admin 200 to view, 403 to act; `ACCOUNT_PENDING`; `/login` (API 401)                                                                | ✅ pass (automated)         |
+| 119 | Bad ids, missing or too-long comments, bad group id                                                           | A, L             | 400; nothing changes                                                                                                                | ✅ pass (automated)         |
+| 120 | Insert an OFFERED application without a deadline straight into the database                                   | unit test        | database refuses it (CHECK constraint)                                                                                              | ✅ pass (automated)         |
+| 121 | Group X's offer passes its deadline unread; the landlord offers the same unit to group Y                      | L, A, C          | Y's offer works; X becomes `EXPIRED` with exactly one `SYSTEM` event                                                                | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-25): **233 tests, 12 files, all passing.**
+Latest run (local, 2026-11-26): **258 tests, 13 files, all passing.**
 
 ## Security review
 
@@ -764,6 +825,16 @@ when Prisma 6.x or ESLint ship patched releases.
 - A student can be invited to several groups for the same term, but can join only one (the others get 409 on accept).
 - Properties, units, and floor plans can't be deleted yet (listings and applications will point at units).
 - Map coordinates are typed in by hand. There's no address lookup (geocoding) yet.
+- **Applications aren't re-checked if the group changes.** The group's size and readiness are checked when it
+  applies. If someone leaves (or the group disbands) afterwards, its applications stay open and the moves still
+  work. Accepting an offer (B5) must re-check both before the unit is marked leased.
+- Leaving or disbanding a group doesn't withdraw its open applications yet.
+- "Send documents" only records a comment for now; uploading the files arrives with Google Cloud Storage (A4).
+- There are no listings yet (A3), so students reach a unit's apply page by link, and any ACTIVE landlord's unit
+  can be applied to. Once A3 lands, only units with an approved listing will accept applications.
+- Offers expire when someone next looks at the application (or tries to act on it), not on a timer. Nobody
+  sees the old status, but the expiry is recorded at that moment, not exactly at the deadline.
+- Accepting an offer (B5) and notifications (B6) aren't built yet.
 - TODO: add more as features land.
 
 ## Team contributions
@@ -804,7 +875,7 @@ the application state machine, offers, and the cost calculator.
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | A1. Admin: list pending landlords; approve or reject; promote to admin         | ✅ B1. Schema + service: roommate groups per term, invites, accept/decline, "ready"  |
 | ✅ A2. Properties, units, floor plans (create/edit with ownership + tests)     | ✅ B2. Cost calculator service + page (cents, rent split, on- vs. off-campus)        |
-| A3. Listing state machine + admin review queue with comments                   | B3. Application schema + state machine + `application_events`                        |
-| A4. GCS uploads (multer memory, type/size checks) for floor plans and photos   | B4. Landlord review actions: docs requested, under review, offer with deadline       |
+| A3. Listing state machine + admin review queue with comments                   | ✅ B3. Application schema + state machine + `application_events`                     |
+| A4. GCS uploads (multer memory, type/size checks) for floor plans and photos   | ✅ B4. Landlord review actions (document upload comes with A4)                       |
 | A5. Map page (Leaflet, vendored) + JSON endpoint + haversine and price filters | B5. Accept offer with a transaction and `FOR UPDATE`; auto-close competitors; expiry |
 | A6. Seeded demo listings (`seed:demo`) + saved listings                        | B6. In-app notifications + student subleases                                         |

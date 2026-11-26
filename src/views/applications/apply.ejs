@@ -1,0 +1,26 @@
+<%- include('../partials/header', { title: 'Apply for ' + unit.label }) %>
+<h1>Apply as a group</h1>
+<section class="card">
+  <h2><%= unit.property.name %>, <%= unit.label %></h2>
+  <p><%= unit.property.city %> · fits <%= unit.beds %> <%= unit.beds === 1 ? 'person' : 'people' %> ·
+    <%= formatCents(unit.rentCents) %> per month (whole unit)</p>
+  <% if (unit.status !== 'AVAILABLE') { %><p class="alert">This unit isn't available right now.</p><% } %>
+</section>
+<section class="card">
+  <% if (groups.length === 0) { %>
+    <p class="muted">You need a roommate group first. <a href="/groups">Create or join one</a>.</p>
+  <% } else { %>
+    <form method="post" action="/units/<%= unit.id %>/apply">
+      <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+      <label for="groupId">Which group is applying?</label>
+      <select id="groupId" name="groupId">
+        <% groups.forEach((g) => { %>
+          <option value="<%= g.id %>"><%= g.name %> · <%= g.term %> (<%= g.memberCount %> <%= g.memberCount === 1 ? 'member' : 'members' %><%= g.ready ? '' : ', not ready' %>)</option>
+        <% }) %>
+      </select>
+      <p class="muted">A group can apply when everyone invited has accepted, and it fits the unit.</p>
+      <button type="submit" class="btn">Submit application</button>
+    </form>
+  <% } %>
+</section>
+<%- include('../partials/footer') %>

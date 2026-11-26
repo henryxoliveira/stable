@@ -255,3 +255,23 @@ h3 {
 .result {
   font-size: 1.1rem;
 }
+.moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+.moves .move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+.moves .move label {
+  margin-top: 0;
+  font-weight: 400;
+  font-size: 0.9rem;
+}
+.moves .move .btn {
+  margin-top: 0;
+}

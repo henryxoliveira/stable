@@ -3,6 +3,7 @@
  * this file and the routers it mounts requires an authenticated user.
  */
 import { Router } from 'express';
+import * as applications from '../controllers/applications.controller.js';
 import * as auth from '../controllers/auth.controller.js';
 import * as costs from '../controllers/costs.controller.js';
 import * as dashboard from '../controllers/dashboard.controller.js';
@@ -27,6 +28,13 @@ import {
   transferSchema,
 } from '../validation/group.schemas.js';
 import { createEstimateSchema, estimateIdParams } from '../validation/cost.schemas.js';
+import {
+  MOVE_BODIES,
+  applicationIdParams,
+  applyBody,
+  unitIdParams,
+} from '../validation/application.schemas.js';
+import { MOVES } from '../services/application.service.js';
 
 const router = Router();
 
@@ -181,5 +189,40 @@ router.post(
 router.get('/costs/:id', student, estimateId, costs.show);
 router.get('/api/costs/:id', student, estimateId, costs.apiShow);
 router.post('/costs/:id/delete', student, estimateId, costs.remove);
+
+// Group applications (B3 part 2). Students apply and make the group's moves;
+// the unit's landlord (ACTIVE accounts only) makes the landlord's moves; admins
+// can view but every action is 403. Membership and ownership are checked in
+// services/application.service.js (anyone else gets 404). Each move is checked
+// against the rules in application.workflow.js.
+const anyRole = requireRole('STUDENT', 'LANDLORD', 'ADMIN');
+const appId = validate(applicationIdParams, { source: 'params' });
+const unitId = validate(unitIdParams, { source: 'params' });
+const activeLandlord = [landlord, requireActiveAccount];
+
+router.get('/units/:id/apply', student, unitId, applications.applyPage);
+router.post('/units/:id/apply', student, unitId, validate(applyBody), applications.apply);
+router.post(
+  '/api/units/:id/applications',
+  student,
+  unitId,
+  validate(applyBody),
+  applications.apply,
+);
+
+router.get('/applications', student, applications.index);
+router.get('/api/applications', student, applications.apiIndex);
+router.get('/applications/:id', anyRole, appId, applications.show);
+router.get('/api/applications/:id', anyRole, appId, applications.apiShow);
+
+router.get('/units/:id/applications', landlordOrAdmin, unitId, applications.unitIndex);
+router.get('/api/units/:id/applications', landlordOrAdmin, unitId, applications.apiUnitIndex);
+
+for (const [slug, def] of Object.entries(MOVES)) {
+  const who = def.actor === 'GROUP_MEMBER' ? [student] : activeLandlord;
+  const chain = [...who, appId, validate(MOVE_BODIES[slug]), applications.moveHandler(slug)];
+  router.post(`/applications/:id/${slug}`, ...chain);
+  router.post(`/api/applications/:id/${slug}`, ...chain);
+}
 
 export default router;
