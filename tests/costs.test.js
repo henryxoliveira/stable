@@ -218,7 +218,22 @@ describe('linking a roommate group', () => {
     expect(e.people).toBe(2);
     expect(e.result.shares).toEqual([210000, 210000]);
     expect(e.linkedGroup).toMatchObject({ available: true, name: 'Hilltop House', memberCount: 2 });
-    expect((await amy.get(`/costs/${id}`)).text).toContain('Hilltop House');
+    const page = (await amy.get(`/costs/${id}`)).text;
+    expect(page).toContain('Hilltop House');
+    expect(page).toContain('2 members now');
+  });
+
+  it('a group with one member says "1 member now", not "1 members"', async () => {
+    const amy = await student('amy@scu.edu');
+    const created = await postJson(amy, '/groups', { name: 'Solo Studio', term: TERM });
+    const groupId = created.body.group.id;
+    const id = await createEstimate(amy, { groupId, people: '' });
+    expect((await getEstimate(amy, id)).people).toBe(1);
+
+    const page = (await amy.get(`/costs/${id}`)).text;
+    expect(page).toContain('Solo Studio');
+    expect(page).toContain('1 member now');
+    expect(page).not.toContain('1 members');
   });
 
   it('a number of people typed in overrides the group size', async () => {

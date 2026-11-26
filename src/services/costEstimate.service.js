@@ -105,3 +105,20 @@ export async function deleteEstimate(user, id) {
   const { count } = await prisma.costEstimate.deleteMany({ where: { id, userId: user.id } });
   return count === 1;
 }
+
+/**
+ * Several of the student's own estimates, in the order asked. If ANY id is not
+ * theirs (or doesn't exist) the result is null, so the caller returns 404 without
+ * revealing which one.
+ * @param {object} user
+ * @param {string[]} ids  unique uuids
+ */
+export async function getMyEstimatesByIds(user, ids) {
+  const rows = await prisma.costEstimate.findMany({
+    where: { id: { in: ids }, userId: user.id },
+    select: INPUT_FIELDS,
+  });
+  if (rows.length !== ids.length) return null;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.map((id) => byId.get(id));
+}

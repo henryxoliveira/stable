@@ -1,0 +1,65 @@
+<%- include('../partials/header', { title: 'Lease summary' }) %>
+<% const t = summary.terms; %>
+<% const bad = new Set(t.unreadable || []); %>
+<% const COULDNT = "Couldn't be read: check your lease"; %>
+<% const missing = (label) => (bad.has(label) ? COULDNT : 'Not stated'); %>
+<% const money = (c, label) => (c === null || c === undefined ? missing(label) : formatCents(c)); %>
+<% const item = (i, name) => i.included === true ? 'Included in rent' : i.monthlyCents !== null ? formatCents(i.monthlyCents) + ' per month' : bad.has(name + ' amount') ? COULDNT : i.included === false ? 'Paid separately (amount not stated)' : missing(name + ' (included or not)'); %>
+<p><a href="/leases">← All lease summaries</a></p>
+<h1><%= summary.originalFilename %></h1>
+<p class="alert">Read by AI. It can make mistakes: check every number against your lease.</p>
+<% if (bad.size > 0) { %>
+  <p class="alert" role="status"><strong>Some items couldn't be read from the lease:</strong>
+    <%= [...bad].join(', ') %>. Check your lease and enter these yourself.</p>
+<% } %>
+
+<section class="card">
+  <h2>Key terms</h2>
+  <table class="breakdown">
+    <tr><th scope="row">Monthly rent</th><td><%= money(t.monthlyRentCents, 'Monthly rent') %></td></tr>
+    <tr><th scope="row">Security deposit</th><td><%= money(t.securityDepositCents, 'Security deposit') %></td></tr>
+    <tr><th scope="row">Lease starts</th><td><%= t.leaseStart || missing('Lease start date') %></td></tr>
+    <tr><th scope="row">Lease ends</th><td><%= t.leaseEnd || missing('Lease end date') %></td></tr>
+    <tr><th scope="row">Utilities</th><td><%= item(t.utilities, 'Utilities') %></td></tr>
+    <tr><th scope="row">Parking</th><td><%= item(t.parking, 'Parking') %></td></tr>
+    <tr><th scope="row">Subletting</th><td><%= t.subletting.allowed ? subletLabel[t.subletting.allowed] : COULDNT %></td></tr>
+  </table>
+  <% for (const note of [t.utilities.notes, t.parking.notes, t.subletting.notes].filter(Boolean)) { %>
+    <p class="muted"><%= note %></p>
+  <% } %>
+
+  <h3>Penalties and fees</h3>
+  <% if (t.penalties.length === 0) { %><p class="muted">None found.</p><% } else { %>
+    <ul>
+      <% t.penalties.forEach((p) => { %>
+        <% const amount = p.amount ?? (Number.isInteger(p.amountCents) ? formatCents(p.amountCents) : null); %>
+        <li><%= p.description %><%= amount ? ': ' + amount : '' %></li>
+      <% }) %>
+    </ul>
+  <% } %>
+
+  <p><a class="btn" href="/costs?fromLease=<%= summary.id %>">Create estimate from this lease</a></p>
+  <p class="muted">This opens the cost estimate form filled in from the lease. You check and edit the
+    numbers before saving; nothing is saved automatically.</p>
+</section>
+
+<section class="card">
+  <h2>Clauses worth a closer look (<%= summary.flaggedClauses.length %>)</h2>
+  <% if (summary.flaggedClauses.length === 0) { %>
+    <p class="muted">The AI didn't flag anything unusual. That doesn't mean the lease has no risks.</p>
+  <% } else { %>
+    <ul class="flagged">
+      <% summary.flaggedClauses.forEach((c) => { %>
+        <li><blockquote><%= c.clause %></blockquote><p><strong>Why:</strong> <%= c.reason %></p></li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+
+<section class="card">
+  <form method="post" action="/leases/<%= summary.id %>/delete">
+    <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+    <button type="submit" class="btn secondary">Delete this summary</button>
+  </form>
+</section>
+<%- include('../partials/footer') %>

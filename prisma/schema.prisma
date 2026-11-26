@@ -43,6 +43,7 @@ model User {
   sentInvitations  GroupInvitation[]
   groupEvents      GroupEvent[]
   costEstimates    CostEstimate[]
+  leaseSummaries   LeaseSummary[]
 
   @@map("users")
 }
@@ -192,4 +193,26 @@ model CostEstimate {
 
   @@index([userId, createdAt])
   @@map("cost_estimates")
+}
+
+// ---------------------------------------------------------------------------
+// AI lease summary. Only the CHECKED summary is stored; the PDF never is.
+// ---------------------------------------------------------------------------
+
+/// Key terms Claude read from a student's lease PDF, after the server validated
+/// every field (money in integer cents, real ISO dates, null when not stated).
+model LeaseSummary {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  originalFilename String   @map("original_filename") // trimmed, max 200 chars; always shown escaped
+  terms            Json // validated terms (see src/validation/leaseTerms.schema.js)
+  flaggedClauses   Json     @map("flagged_clauses") // [{ clause, reason }]
+  model            String // which Claude model produced it, e.g. "claude-haiku-5-5"
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  /// A deleted user's summaries are deleted with them.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("lease_summaries")
 }

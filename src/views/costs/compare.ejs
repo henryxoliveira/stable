@@ -1,0 +1,50 @@
+<%- include('../partials/header', { title: 'Compare estimates' }) %>
+<p><a href="/costs">← Cost calculator</a></p>
+<h1>Compare estimates</h1>
+<p class="muted">Pick two or more of your saved estimates and how many people will share. Each one is
+  split the same way, so you can see what one person pays.</p>
+
+<% if (locals.errors && Object.keys(errors).length) { %>
+  <p class="alert" role="alert"><%= Object.values(errors)[0] %></p>
+<% } %>
+
+<section class="card">
+  <% if (estimates.length < 2) { %>
+    <p class="muted">Save at least two estimates in the <a href="/costs">cost calculator</a> to compare them.</p>
+  <% } else { %>
+    <form method="get" action="/costs/compare">
+      <fieldset>
+        <legend>Estimates (pick 2 to 8)</legend>
+        <% estimates.forEach((e) => { %>
+          <label class="radio"><input type="checkbox" name="ids" value="<%= e.id %>" <%= ids.includes(e.id) ? 'checked' : '' %>> <%= e.name %></label>
+        <% }) %>
+      </fieldset>
+      <label for="people">Number of people</label>
+      <input id="people" name="people" type="number" min="1" max="16" step="1" value="<%= people %>">
+      <button type="submit" class="btn">Compare</button>
+    </form>
+  <% } %>
+</section>
+
+<% if (comparison) { %>
+  <section class="card">
+    <h2>Side by side, <%= comparison.people %> <%= comparison.people === 1 ? 'person' : 'people' %></h2>
+    <table class="breakdown compare">
+      <tr><th scope="col">Estimate</th><td><strong>Per person, monthly</strong><br><span class="muted">the most anyone pays</span></td><td><strong>Per person, whole lease</strong></td></tr>
+      <% comparison.rows.forEach((r) => { %>
+        <tr class="<%= r.cheapestMonthly ? 'cheapest' : '' %>">
+          <th scope="row"><a href="/costs/<%= r.id %>"><%= r.name %></a>
+            <% if (r.cheapestMonthly) { %><span class="badge ready">cheapest per month</span><% } %>
+            <% if (comparison.leaseTotalDiffers && r.lowestLeaseTotal) { %><span class="badge">lowest lease total</span><% } %></th>
+          <td><%= formatCents(r.perPersonMonthlyCents) %></td>
+          <td><%= formatCents(r.perPersonLeaseTotalCents) %> <span class="muted">(<%= r.leaseMonths %> months)</span></td>
+        </tr>
+      <% }) %>
+    </table>
+    <% if (comparison.leaseTotalDiffers) { %>
+      <p class="muted">The cheapest per month isn't the cheapest over the whole lease, because the leases
+        are different lengths.</p>
+    <% } %>
+  </section>
+<% } %>
+<%- include('../partials/footer') %>

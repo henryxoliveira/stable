@@ -1,0 +1,45 @@
+<%- include('../partials/header', { title: 'Lease summary (AI)' }) %>
+<h1>Lease summary (AI)</h1>
+<p class="muted">Upload your lease as a PDF. Stable asks an AI model (Claude) to pull out the key terms
+  and flag clauses worth a closer look. The AI can misread a lease, so always check the numbers
+  against your lease before you rely on them.</p>
+
+<section class="card">
+  <h2>Summarize a lease</h2>
+  <% if (!aiEnabled) { %>
+    <p class="alert">AI summaries are turned off on this site right now. Everything else works: you can
+      still <a href="/costs">enter a cost estimate yourself</a>.</p>
+  <% } else { %>
+    <p class="muted"><strong>Privacy:</strong> the PDF is sent to Anthropic's API to be read. Stable keeps
+      only the checked summary and never saves the PDF. Don't upload documents with details you
+      don't want processed.</p>
+    <noscript><p class="alert">Uploading a lease needs JavaScript. Turn it on, or enter your costs
+      yourself in the <a href="/costs">cost calculator</a>.</p></noscript>
+    <form id="lease-upload" method="post" action="/leases" enctype="multipart/form-data" hidden>
+      <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+      <label for="lease">Lease PDF (up to 5 MB)</label>
+      <input id="lease" name="lease" type="file" accept="application/pdf,.pdf" required>
+      <p id="lease-status" class="field-error" role="alert"></p>
+      <button type="submit" class="btn">Summarize lease</button>
+    </form>
+    <script src="/js/lease-upload.js" defer></script>
+  <% } %>
+</section>
+
+<section class="card">
+  <h2>My lease summaries</h2>
+  <% if (summaries.length === 0) { %>
+    <p class="muted">No summaries yet.</p>
+  <% } else { %>
+    <ul class="rows">
+      <% summaries.forEach((s) => { %>
+        <li>
+          <span><a href="/leases/<%= s.id %>"><%= s.originalFilename %></a></span>
+          <span class="muted"><%= s.createdAt.toISOString().slice(0, 10) %> ·
+            <%= s.flaggedClauses.length %> flagged <%= s.flaggedClauses.length === 1 ? 'clause' : 'clauses' %></span>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+<%- include('../partials/footer') %>

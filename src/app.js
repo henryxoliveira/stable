@@ -15,11 +15,24 @@ import { csrfProtection, exposeCsrfToken } from './middleware/csrf.js';
 import { errorHandler, notFoundHandler } from './middleware/errors.js';
 import publicRoutes from './routes/public.routes.js';
 import protectedRoutes from './routes/protected.routes.js';
+import { createDefaultAiClient } from './services/leaseAi.service.js';
+import { createLeaseSummaryLimiter } from './middleware/rateLimit.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-export function createApp() {
+/**
+ * @param {object} [options]
+ * @param {{ messages: { create: Function } } | null} [options.aiClient]
+ *   The Claude client for lease summaries. Tests pass a fake here. When omitted,
+ *   a real client is made only if ANTHROPIC_API_KEY is set and we are NOT in tests;
+ *   otherwise it is null and AI features are turned off.
+ */
+export function createApp({ aiClient = createDefaultAiClient() } = {}) {
   const app = express();
+
+  // Per-app (not per-module) so each test app starts with a fresh rate-limit counter.
+  app.locals.aiClient = aiClient;
+  app.locals.leaseSummaryLimiter = createLeaseSummaryLimiter();
 
   // Cloud Run sits behind Google's HTTPS proxy; trust it so secure cookies
   // and req.ip (used by the rate limiter) work correctly.
