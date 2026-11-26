@@ -118,8 +118,10 @@ only by group members, the listing owner, and admins. PENDING accounts can log i
   each move, deadline check) live in `src/services/application.workflow.js` and must match the README diagram.
   Group size ≤ unit capacity. One active application per group per unit.
   Offers have a deadline: expire via check-on-read or a scheduled job, and the unit goes back to available.
-  **Accept** = one transaction with `SELECT … FOR UPDATE` on the unit: mark it leased, close all other open
-  applications for the unit (with notifications). Two groups can never hold the same unit.
+  **Accept** = one transaction, locks group → unit → application (`SELECT … FOR UPDATE`): re-check the group is
+  ready, fits, and the unit is AVAILABLE with an ACTIVE landlord; mark the unit leased; set every other open
+  application for the unit, and every other open application from the group, to `CLOSED` (a SYSTEM-only final
+  state), each with an event (notifications later). Two groups can never hold the same unit.
 - **On-campus room selection:** stretch goal. Skip unless the team asks.
 
 ## Back-end capabilities to build (keep them testable in services/)

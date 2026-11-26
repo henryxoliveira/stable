@@ -72,7 +72,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Saved listings                                                                        | ⬜     |
 | Roommate groups per term (invite by email, accept, decline, transfer, leave, history) | ✅     |
 | Group application lifecycle, document requests, offers with deadlines                 | ✅     |
-| Offer acceptance with row locking; competing applications auto-closed                 | ⬜     |
+| Offer acceptance with row locking; competing applications auto-closed                 | ✅     |
 | Cost calculator: per-person rent, utilities, and parking, on- vs. off-campus          | ✅     |
 | Student subleases (same approval and application flow)                                | ⬜     |
 | In-app notifications                                                                  | ⬜     |
@@ -237,11 +237,16 @@ stateDiagram-v2
     submitted --> withdrawn: group withdraws
     docs_requested --> withdrawn: group withdraws
     under_review --> withdrawn: group withdraws
+    submitted --> closed: system closes it (unit leased, or group placed elsewhere)
+    docs_requested --> closed: system closes it (unit leased, or group placed elsewhere)
+    under_review --> closed: system closes it (unit leased, or group placed elsewhere)
+    offered --> closed: system closes it (unit leased, or group placed elsewhere)
     accepted --> [*]
     declined --> [*]
     expired --> [*]
     rejected --> [*]
     withdrawn --> [*]
+    closed --> [*]
 ```
 
 **Where these rules live.** The states, the allowed moves, and who may make each move are written down in one
@@ -252,8 +257,12 @@ change: it adds the database, the locks, and the history, but never its own copy
 - In the code, states are written in capitals (`DOCS_REQUESTED`). The diagram above uses lowercase to stay readable.
   Pages show friendly names such as "Documents requested".
 - Each move has exactly one kind of actor: a **group member**, the **listing owner** (landlord), or the
-  **system** (only for expiring an offer). A move by the wrong person is refused.
-- Finished applications (accepted, declined, expired, rejected, withdrawn) can't change any more.
+  **system** (expiring an offer, or closing other applications when a group accepts). A move by the wrong
+  person is refused.
+- Finished applications (accepted, declined, expired, rejected, withdrawn, closed) can't change any more.
+- **Closed** means the system closed it: when a group accepts an offer, every other open application for that
+  unit is closed ("This unit was leased to another group"), and so is every other open application from that
+  group ("Your group accepted another place"), because a group can't lease two places.
 - Once an offer is made, the group can accept or decline, but not withdraw.
 - **Deadline:** an offer counts as expired at the exact deadline time. Accepting needs the deadline and the
   current time to be checked; if they are missing or not valid dates, the move is refused, so later code can't skip the check.
@@ -420,28 +429,32 @@ transaction. Landlord moves need an ACTIVE account.
 `EXPIRED` with a `SYSTEM` event. Exactly at the deadline counts as expired. The update only matches an offer that
 is still open, so two reads at the same moment write only one event.
 
-**3. Student B (same group) accepts** with `POST /api/applications/:id/accept` (TODO, B5). _Before marking the
-unit leased, accept must re-check the group's size and readiness (the group may have changed since applying).
-It locks the unit first; if it also needs the group row, it must lock the group **before** the unit, the same
-order as applying, or the two could deadlock._
+**3. Student B (same group) accepts the offer** with `POST /api/applications/:id/accept` (or the "Accept offer"
+button). Only students reach this route; landlords and admins get 403.
 
-1. Authorization: the user is a member of the application's group (otherwise 404).
-2. `prisma.$transaction(async (tx) => { … })`:
-   - `SELECT … FROM units WHERE id = $1 FOR UPDATE`: locks the unit row, so a concurrent accept for
-     the same unit waits here.
-   - Re-reads the application inside the transaction. It must still be `offered`, and `now < offerExpiresAt`
-     (otherwise it is marked `expired` and the request gets a 409).
-   - Unit status: `available` → `leased`.
-   - The application becomes `accepted`, with an event row.
-   - Every _other_ open application for that unit is marked `rejected` (reason: "unit leased"), with
-     event rows and notifications.
-3. The commit releases the lock. The second request then sees `leased` and fails cleanly. **Two groups can never both hold the unit.**
-4. Response: 200 with the updated application.
+1. **Expire first:** if the offer's deadline has passed, it becomes `EXPIRED` (in its own transaction, so it
+   stays expired) and the request gets 409. Exactly at the deadline counts as passed.
+2. **One transaction, with locks in this order: group row → unit row → application row.** It's the same order as
+   applying (group → unit) and making an offer (unit → application), so no two requests can wait on each other in
+   a circle. The student must be an accepted member of the group (otherwise 404).
+3. **Ask the rules:** `canTransition(OFFERED, ACCEPTED, GROUP_MEMBER, { offerExpiresAt, now })`. If the offer was
+   rescinded, declined, or accepted a moment earlier, this refuses with a 409.
+4. **Re-check what may have changed since the group applied**, each a 409: the group is still ready (nobody
+   still invited), it still fits the unit, the unit is still `AVAILABLE`, and the landlord is still ACTIVE.
+5. **Write:** the unit becomes `LEASED`, the application `ACCEPTED`, with an event for the student.
+6. **Close what's now impossible**, each with a `SYSTEM` event: every other open application for this unit ("This
+   unit was leased to another group"), and every other open application from this group ("Your group accepted
+   another place"). Each close goes through `canTransition(…, CLOSED, SYSTEM)`.
+7. **Commit.** A second accept for the same unit waits on the unit lock, then finds the unit leased (or its own
+   application closed) and gets a clean 409. **Two groups can never both hold the unit.** A group that has
+   accepted a place can't open new applications (409 `GROUP_ALREADY_PLACED`).
+8. **Response:** 200 with the accepted application and how many others were closed.
 
 ## Data model
 
 **Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init`, `20261110030323_roommate_groups`,
-`20261124073118_cost_estimates`, `20261125025154_properties_units_floor_plans`, and `20261126065226_applications`):
+`20261124073118_cost_estimates`, `20261125025154_properties_units_floor_plans`, `20261126065226_applications`, and
+`20261126075425_application_closed`):
 
 | Table     | Columns                                                                                                                                                                 | Notes                        |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
@@ -493,7 +506,8 @@ erDiagram
     roommate_groups |o--o{ cost_estimates : "linked to (optional)"
 ```
 
-**Group applications** (migration `20261126065226_applications`):
+**Group applications** (migrations `20261126065226_applications` and `20261126075425_application_closed`, which
+adds the `CLOSED` status):
 
 | Table                | Columns                                                                                                                                             | Notes                                                                                      |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -787,8 +801,18 @@ browser with its own cookies.
 | 119 | Bad ids, missing or too-long comments, bad group id                                                           | A, L             | 400; nothing changes                                                                                                                | ✅ pass (automated)         |
 | 120 | Insert an OFFERED application without a deadline straight into the database                                   | unit test        | database refuses it (CHECK constraint)                                                                                              | ✅ pass (automated)         |
 | 121 | Group X's offer passes its deadline unread; the landlord offers the same unit to group Y                      | L, A, C          | Y's offer works; X becomes `EXPIRED` with exactly one `SYSTEM` event                                                                | ✅ pass (automated)         |
+| 122 | Accept an offer (API and the page button)                                                                     | A, B             | unit `LEASED`, application `ACCEPTED`, event written; no more buttons                                                               | ✅ pass (automated)         |
+| 123 | Accept closes the unit's other open applications and the group's other open ones                              | A, C, L          | each `CLOSED` with a `SYSTEM` event and its reason; finished ones untouched                                                         | ✅ pass (automated)         |
+| 124 | A group that accepted a place applies somewhere else                                                          | A                | 409 `GROUP_ALREADY_PLACED`                                                                                                          | ✅ pass (automated)         |
+| 125 | Race ×5: two members accept at the same moment                                                                | A, B             | exactly one 200 and one 409; unit leased once; one acceptance                                                                       | ✅ pass (automated)         |
+| 126 | Race ×6: accept vs. the landlord rescinding                                                                   | A, L             | exactly one wins; the other gets 409; unit leased only if accept won                                                                | ✅ pass (automated)         |
+| 127 | Race ×6: accept vs. another group applying to the same unit                                                   | A, C             | no open application is ever left on the leased unit                                                                                 | ✅ pass (automated)         |
+| 128 | Accept exactly at the deadline; 1 ms before; after it passed (HTTP)                                           | A                | at/after: 409 and stays `EXPIRED` (one event); 1 ms before: accepted                                                                | ✅ pass (automated)         |
+| 129 | Accept after the group grew too big, got a new invite, or the unit was leased                                 | A                | 409 `GROUP_TOO_BIG` / `GROUP_NOT_READY` / `UNIT_NOT_AVAILABLE`; nothing changes                                                     | ✅ pass (automated)         |
+| 130 | Accept after the landlord's account stopped being ACTIVE                                                      | A, L             | 409 `LANDLORD_NOT_ACTIVE`; unit not leased                                                                                          | ✅ pass (automated)         |
+| 131 | Outsider, landlord, and admin try to accept; bad or missing id; not yet offered                               | S, L, admin      | 404 / 403 / 403; 400 / 404; 409 with the workflow's reason                                                                          | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-26): **258 tests, 13 files, all passing.**
+Latest run (local, 2026-11-26): **286 tests, 14 files, all passing.**
 
 ## Security review
 
@@ -825,16 +849,19 @@ when Prisma 6.x or ESLint ship patched releases.
 - A student can be invited to several groups for the same term, but can join only one (the others get 409 on accept).
 - Properties, units, and floor plans can't be deleted yet (listings and applications will point at units).
 - Map coordinates are typed in by hand. There's no address lookup (geocoding) yet.
-- **Applications aren't re-checked if the group changes.** The group's size and readiness are checked when it
-  applies. If someone leaves (or the group disbands) afterwards, its applications stay open and the moves still
-  work. Accepting an offer (B5) must re-check both before the unit is marked leased.
+- **Applications are only re-checked at the end.** The group's size and readiness are checked when it applies and
+  again when it accepts an offer. In between, if someone leaves or joins, the application stays open and the
+  landlord's moves still work; a group that no longer fits finds out when it tries to accept.
 - Leaving or disbanding a group doesn't withdraw its open applications yet.
 - "Send documents" only records a comment for now; uploading the files arrives with Google Cloud Storage (A4).
 - There are no listings yet (A3), so students reach a unit's apply page by link, and any ACTIVE landlord's unit
   can be applied to. Once A3 lands, only units with an approved listing will accept applications.
 - Offers expire when someone next looks at the application (or tries to act on it), not on a timer. Nobody
   sees the old status, but the expiry is recorded at that moment, not exactly at the deadline.
-- Accepting an offer (B5) and notifications (B6) aren't built yet.
+- No notifications yet (B6): when a group accepts, the landlord and the groups whose applications were closed
+  only see it on their pages, not by email or an alert.
+- A leased unit stays leased. There's no lease end date or "cancel the lease" action yet, so a unit can't become
+  available again through the app.
 - TODO: add more as features land.
 
 ## Team contributions
@@ -877,5 +904,5 @@ the application state machine, offers, and the cost calculator.
 | ✅ A2. Properties, units, floor plans (create/edit with ownership + tests)     | ✅ B2. Cost calculator service + page (cents, rent split, on- vs. off-campus)        |
 | A3. Listing state machine + admin review queue with comments                   | ✅ B3. Application schema + state machine + `application_events`                     |
 | A4. GCS uploads (multer memory, type/size checks) for floor plans and photos   | ✅ B4. Landlord review actions (document upload comes with A4)                       |
-| A5. Map page (Leaflet, vendored) + JSON endpoint + haversine and price filters | B5. Accept offer with a transaction and `FOR UPDATE`; auto-close competitors; expiry |
+| A5. Map page (Leaflet, vendored) + JSON endpoint + haversine and price filters | ✅ B5. Accept offer with a transaction and `FOR UPDATE`; auto-close the rest; expiry |
 | A6. Seeded demo listings (`seed:demo`) + saved listings                        | B6. In-app notifications + student subleases                                         |

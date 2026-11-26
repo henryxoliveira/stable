@@ -13,9 +13,11 @@
  * LOCK ORDER (prevents deadlocks; every path takes locks in this order):
  *   apply        = group row → unit row
  *   make offer   = unit row → application row
+ *   accept       = group row → unit row → application row (then it updates the other
+ *                  open applications it closes)
  *   other moves  = application row only
- *   B5's accept will lock the unit first (unit → applications). If it ever needs the
- *   group row too, it must take it BEFORE the unit, like apply does.
+ * Nothing ever holds a later lock while waiting for an earlier one, so two
+ * transactions can't wait on each other in a cycle.
  *
  * Offer expiry: whenever applications are read (and before every move), any OFFERED
  * application past its deadline becomes EXPIRED with a SYSTEM event. Exactly at the
@@ -239,17 +241,19 @@ function present(app, role) {
 /** The buttons this actor sees now (from allowedMoves()), with what each form needs. */
 export function movesFor(status, actor) {
   return allowedMoves(status, actor)
-    .filter((m) => SLUG_FOR_ACTION[m.action]) // e.g. "accept" arrives with B5
     .map((m) => {
+      // "accept" has its own route (it does much more than change one status).
+      if (m.action === 'accept') return { slug: 'accept', label: 'Accept offer' };
       const slug = SLUG_FOR_ACTION[m.action];
-      const def = MOVES[slug];
-      return {
-        slug,
-        label: def.label,
-        commentRequired: Boolean(def.commentRequired),
-        needsDeadline: Boolean(def.needsDeadline),
-      };
-    });
+      return slug ? { slug, label: MOVES[slug].label, def: MOVES[slug] } : null;
+    })
+    .filter(Boolean)
+    .map(({ slug, label, def = {} }) => ({
+      slug,
+      label,
+      commentRequired: Boolean(def.commentRequired),
+      needsDeadline: Boolean(def.needsDeadline),
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -363,6 +367,15 @@ export async function apply(user, unitId, groupId, now = new Date()) {
     if (!fit.ok) throw conflict(fit.reason, 'GROUP_TOO_BIG');
     if (unit.status !== 'AVAILABLE') {
       throw conflict('This unit isn’t available any more.', 'UNIT_NOT_AVAILABLE');
+    }
+    // A group that already accepted a place can't apply anywhere else (accept also
+    // locks the group first, so the two can't interleave).
+    const placed = await tx.application.findFirst({
+      where: { groupId, status: STATES.ACCEPTED },
+      select: { id: true },
+    });
+    if (placed) {
+      throw conflict('Your group has already accepted a place.', 'GROUP_ALREADY_PLACED');
     }
     const open = await tx.application.findFirst({
       where: { groupId, unitId, status: { in: OPEN_STATES } },
@@ -500,4 +513,132 @@ export async function move(user, id, slug, input = {}, now = new Date()) {
       offerExpiresAt: updated.offerExpiresAt,
     };
   }, TX_OPTIONS);
+}
+
+// ---------------------------------------------------------------------------
+// Accepting an offer (B5)
+// ---------------------------------------------------------------------------
+
+export const CLOSE_REASON_UNIT_LEASED = 'This unit was leased to another group';
+export const CLOSE_REASON_GROUP_PLACED = 'Your group accepted another place';
+
+/**
+ * A group member accepts an offer. ONE transaction, locks group → unit → application:
+ *   - only an accepted member of the group (404 otherwise; admins and landlords 403)
+ *   - canTransition(OFFERED, ACCEPTED, GROUP_MEMBER, { offerExpiresAt, now }) must allow it;
+ *     past the deadline the offer is marked EXPIRED (and stays so) and the request gets 409
+ *   - re-check: the group is still ready and still fits, the unit is still AVAILABLE,
+ *     and its landlord is still ACTIVE
+ *   - the unit becomes LEASED, the application ACCEPTED (with an event)
+ *   - every other open application for the unit, and every other open application
+ *     from the group, becomes CLOSED with a SYSTEM event and a plain reason.
+ * Two groups can never hold the same unit: a second accept waits on the unit lock and
+ * then finds it LEASED (or its own application already CLOSED).
+ */
+export async function accept(user, id, now = new Date()) {
+  if (user.role !== 'STUDENT') {
+    throw forbidden('Only a member of the applying group can accept an offer.');
+  }
+  // Expire first, in its own transaction, so an expired offer stays EXPIRED even
+  // though this request is refused.
+  await expireDueOffers({ id }, now);
+
+  try {
+    return await prisma.$transaction((tx) => acceptInTx(tx, user, id, now), TX_OPTIONS);
+  } catch (err) {
+    // The deadline was reached between the expiry above and the check inside the
+    // transaction: record the expiry now (the transaction was rolled back).
+    if (err.code === 'OFFER_EXPIRED') await expireDueOffers({ id }, now);
+    throw err;
+  }
+}
+
+async function acceptInTx(tx, user, id, now) {
+  // groupId and unitId never change, so reading them before locking is safe.
+  const peek = await tx.application.findUnique({
+    where: { id },
+    select: { groupId: true, unitId: true },
+  });
+  if (!peek) throw notFound();
+
+  // Lock order: group → unit → application.
+  const g = await lockGroupForApplying(tx, user, peek.groupId); // 404 if not an accepted member
+  await lockUnit(tx, peek.unitId);
+  await lockApplication(tx, id);
+
+  const app = await tx.application.findUnique({
+    where: { id },
+    select: { id: true, status: true, offerExpiresAt: true, groupId: true, unitId: true },
+  });
+  const check = canTransition(app.status, STATES.ACCEPTED, ACTORS.GROUP_MEMBER, {
+    offerExpiresAt: app.offerExpiresAt,
+    now,
+  });
+  if (!check.allowed) throw refusalError(check);
+
+  // Re-checks: the group may have changed since it applied (B3 TODO).
+  if (!isReady(g)) {
+    throw conflict(
+      'Your group isn’t ready: everyone invited must accept or be removed first.',
+      'GROUP_NOT_READY',
+    );
+  }
+  const unit = await tx.unit.findUnique({
+    where: { id: app.unitId },
+    select: {
+      id: true,
+      beds: true,
+      bedrooms: true,
+      status: true,
+      property: { select: { owner: { select: { status: true } } } },
+    },
+  });
+  const fit = groupFitsUnit(g.memberCount, unit);
+  if (!fit.ok) throw conflict(fit.reason, 'GROUP_TOO_BIG');
+  if (unit.status !== 'AVAILABLE') {
+    throw conflict('This unit isn’t available any more.', 'UNIT_NOT_AVAILABLE');
+  }
+  // TODO(A3): also require the unit's listing to still be APPROVED.
+  if (unit.property.owner.status !== 'ACTIVE') {
+    throw conflict('This landlord’s account isn’t active right now.', 'LANDLORD_NOT_ACTIVE');
+  }
+
+  await tx.unit.update({ where: { id: unit.id }, data: { status: 'LEASED' } });
+  await tx.application.update({ where: { id }, data: { status: STATES.ACCEPTED } });
+  await tx.applicationEvent.create({
+    data: {
+      applicationId: id,
+      actorId: user.id,
+      actorType: ACTORS.GROUP_MEMBER,
+      fromStatus: STATES.OFFERED,
+      toStatus: STATES.ACCEPTED,
+    },
+  });
+
+  // Close everything else this acceptance makes impossible.
+  const others = await tx.application.findMany({
+    where: {
+      id: { not: id },
+      status: { in: OPEN_STATES },
+      OR: [{ unitId: app.unitId }, { groupId: app.groupId }],
+    },
+    select: { id: true, status: true, unitId: true },
+  });
+  for (const other of others) {
+    const close = canTransition(other.status, STATES.CLOSED, ACTORS.SYSTEM);
+    if (!close.allowed) throw refusalError(close); // can't happen for open states; never skip silently
+    await tx.application.update({ where: { id: other.id }, data: { status: STATES.CLOSED } });
+    await tx.applicationEvent.create({
+      data: {
+        applicationId: other.id,
+        actorId: null,
+        actorType: ACTORS.SYSTEM,
+        fromStatus: other.status,
+        toStatus: STATES.CLOSED,
+        comment: other.unitId === app.unitId ? CLOSE_REASON_UNIT_LEASED : CLOSE_REASON_GROUP_PLACED,
+      },
+    });
+  }
+
+  return { id, status: STATES.ACCEPTED, unitId: app.unitId, closed: others.length };
 }

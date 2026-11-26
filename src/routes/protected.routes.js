@@ -218,6 +218,12 @@ router.get('/api/applications/:id', anyRole, appId, applications.apiShow);
 router.get('/units/:id/applications', landlordOrAdmin, unitId, applications.unitIndex);
 router.get('/api/units/:id/applications', landlordOrAdmin, unitId, applications.apiUnitIndex);
 
+// Accepting an offer (B5): its own route, because it leases the unit and closes
+// the other open applications in one locked transaction. Students only.
+const acceptBody = validate(z.object({}));
+router.post('/applications/:id/accept', student, appId, acceptBody, applications.accept);
+router.post('/api/applications/:id/accept', student, appId, acceptBody, applications.accept);
+
 for (const [slug, def] of Object.entries(MOVES)) {
   const who = def.actor === 'GROUP_MEMBER' ? [student] : activeLandlord;
   const chain = [...who, appId, validate(MOVE_BODIES[slug]), applications.moveHandler(slug)];

@@ -83,3 +83,10 @@ export function moveHandler(slug) {
     res.redirect(back);
   };
 }
+
+/** POST /applications/:id/accept and POST /api/applications/:id/accept (B5). */
+export async function accept(req, res) {
+  const result = await applications.accept(req.user, req.valid.id);
+  if (wantsJson(req)) return res.json({ application: result });
+  res.redirect(`/applications/${req.valid.id}`);
+}

@@ -38,7 +38,12 @@ function movesFromReadme() {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const section = readme.slice(readme.indexOf('### C. Group application'));
   const diagram = section.slice(section.indexOf('```mermaid'), section.indexOf('```\n', 10));
-  const actorByWord = { group: 'GROUP_MEMBER', landlord: 'LISTING_OWNER', deadline: 'SYSTEM' };
+  const actorByWord = {
+    group: 'GROUP_MEMBER',
+    landlord: 'LISTING_OWNER',
+    deadline: 'SYSTEM',
+    system: 'SYSTEM',
+  };
 
   const moves = [];
   for (const line of diagram.split('\n')) {
@@ -128,7 +133,7 @@ describe('canTransition(): wrong actor', () => {
     const result = canTransition(move.from, move.to, wrongActor, contextFor(move));
     expect(result).toMatchObject({ allowed: false, code: 'WRONG_ACTOR' });
     expect(result.reason).toMatch(
-      /^Only (a member of the applying group|the listing owner|the system \(when the deadline passes\)) can [a-z ]+\.$/,
+      /^Only (a member of the applying group|the listing owner|the system) can [a-z ]+\.$/,
     );
   });
 
@@ -140,7 +145,7 @@ describe('canTransition(): wrong actor', () => {
       'Only a member of the applying group can accept an offer.',
     );
     expect(canTransition('OFFERED', 'EXPIRED', 'GROUP_MEMBER', AT).reason).toBe(
-      'Only the system (when the deadline passes) can expire an offer.',
+      'Only the system can expire an offer.',
     );
   });
 
@@ -155,7 +160,7 @@ describe('canTransition(): wrong actor', () => {
 describe('canTransition(): final states', () => {
   it('final states are exactly accepted, declined, expired, rejected, withdrawn', () => {
     expect([...FINAL_STATES].sort()).toEqual(
-      ['ACCEPTED', 'DECLINED', 'EXPIRED', 'REJECTED', 'WITHDRAWN'].sort(),
+      ['ACCEPTED', 'CLOSED', 'DECLINED', 'EXPIRED', 'REJECTED', 'WITHDRAWN'].sort(),
     );
     expect(TRANSITIONS.some((t) => isFinal(t.from))).toBe(false);
   });
@@ -270,7 +275,10 @@ describe('allowedMoves()', () => {
       'reject',
     ]);
     expect(allowedMoves(null, 'GROUP_MEMBER')).toEqual([{ to: 'SUBMITTED', action: 'submit' }]);
-    expect(allowedMoves('OFFERED', 'SYSTEM')).toEqual([{ to: 'EXPIRED', action: 'expire offer' }]);
+    expect(allowedMoves('OFFERED', 'SYSTEM')).toEqual([
+      { to: 'EXPIRED', action: 'expire offer' },
+      { to: 'CLOSED', action: 'close' },
+    ]);
   });
 });
 
