@@ -152,6 +152,27 @@ export async function requireAcceptedMembership(user, groupId) {
   return { group: { id, name, term }, memberCount };
 }
 
+/**
+ * For group applications: LOCK the group row (inside the caller's transaction),
+ * then require an accepted member of an ACTIVE group (404 otherwise, same as
+ * above). Returns the counts the caller needs for isReady() and the size check.
+ *
+ * Lock order: the application service takes this group lock BEFORE the unit lock
+ * (apply = group → unit). Any code that needs both must use the same order.
+ * @param {import('@prisma/client').Prisma.TransactionClient} tx
+ */
+export async function lockGroupForApplying(tx, user, groupId) {
+  await lockGroup(tx, groupId);
+  const access = await loadAccess(tx, user, groupId);
+  if (access.role !== 'owner' && access.role !== 'member') throw notFound();
+  const memberCount = await tx.groupMember.count({ where: { groupId } });
+  const pendingInviteCount = await tx.groupInvitation.count({
+    where: { groupId, status: 'PENDING' },
+  });
+  const { id, name, term } = access.group;
+  return { group: { id, name, term }, memberCount, pendingInviteCount };
+}
+
 function requireOwner(access, action) {
   if (access.role !== 'owner') throw forbidden(`Only the group owner can ${action}.`);
 }

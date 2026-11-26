@@ -1,0 +1,24 @@
+<%# Buttons for the moves this person can make now (from allowedMoves()). Expects `application`. %>
+<% if (application.viewer.moves.length) { %>
+  <div class="moves">
+    <% application.viewer.moves.forEach((m) => { %>
+      <form method="post" action="/applications/<%= application.id %>/<%= m.slug %>" class="move">
+        <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+        <% if (m.needsDeadline) { %>
+          <label for="days-<%= application.id %>">Offer open for</label>
+          <select id="days-<%= application.id %>" name="offerDays">
+            <% for (let d = 1; d <= 14; d += 1) { %><option value="<%= d %>" <%= d === 3 ? 'selected' : '' %>><%= d %> <%= d === 1 ? 'day' : 'days' %></option><% } %>
+          </select>
+        <% } %>
+        <% if (m.commentRequired) { %>
+          <label for="c-<%= m.slug %>-<%= application.id %>"><%= m.slug === 'send-documents' ? 'What did you send? (e.g. "Sent pay stubs by email")' : 'Which documents do you need?' %></label>
+          <input id="c-<%= m.slug %>-<%= application.id %>" name="comment" type="text" maxlength="500" required>
+        <% } else if (m.slug === 'reject' || m.slug === 'withdraw' || m.slug === 'decline') { %>
+          <label for="c-<%= m.slug %>-<%= application.id %>"><%= m.slug === 'reject' ? 'Reason (optional)' : 'Comment (optional)' %></label>
+          <input id="c-<%= m.slug %>-<%= application.id %>" name="comment" type="text" maxlength="500">
+        <% } %>
+        <button type="submit" class="btn small <%= ['withdraw', 'decline', 'reject', 'rescind'].includes(m.slug) ? 'secondary' : '' %>"><%= m.label %></button>
+      </form>
+    <% }) %>
+  </div>
+<% } %>

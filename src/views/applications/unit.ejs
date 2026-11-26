@@ -1,0 +1,20 @@
+<%- include('../partials/header', { title: 'Applications for ' + unit.label }) %>
+<p><a href="/properties/<%= unit.property.id %>">← <%= unit.property.name %></a></p>
+<h1>Applications for <%= unit.label %></h1>
+<p class="muted">Fits <%= unit.beds %> · unit is <%= unit.status === 'AVAILABLE' ? 'available' : 'leased' %>.
+  Only one group can have an open offer at a time.</p>
+<% if (applications.length === 0) { %>
+  <section class="card"><p class="muted">No applications yet.</p></section>
+<% } %>
+<% applications.forEach((application) => { %>
+  <section class="card">
+    <h2><a href="/applications/<%= application.id %>"><%= application.group.name %></a>
+      <span class="badge"><%= application.statusLabel %></span></h2>
+    <p class="muted"><%= application.groupSize %> <%= application.groupSize === 1 ? 'person' : 'people' %>:
+      <%= application.group.members.join(', ') %>
+      <% if (application.status === 'OFFERED') { %> · offer open until <%= formatPacific(application.offerExpiresAt) %><% } %></p>
+    <%- include('_actions', { application }) %>
+    <%- include('_history', { application }) %>
+  </section>
+<% }) %>
+<%- include('../partials/footer') %>

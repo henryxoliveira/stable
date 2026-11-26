@@ -38,12 +38,13 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
-  ownedGroups      RoommateGroup[]
-  groupMemberships GroupMember[]
-  properties       Property[]
-  sentInvitations  GroupInvitation[]
-  groupEvents      GroupEvent[]
-  costEstimates    CostEstimate[]
+  ownedGroups       RoommateGroup[]
+  groupMemberships  GroupMember[]
+  properties        Property[]
+  sentInvitations   GroupInvitation[]
+  groupEvents       GroupEvent[]
+  costEstimates     CostEstimate[]
+  applicationEvents ApplicationEvent[]
 
   @@map("users")
 }
@@ -101,8 +102,9 @@ model Unit {
   createdAt      DateTime   @default(now()) @map("created_at")
   updatedAt      DateTime   @updatedAt @map("updated_at")
 
-  property   Property    @relation(fields: [propertyId], references: [id])
-  floorPlans FloorPlan[]
+  property     Property      @relation(fields: [propertyId], references: [id])
+  floorPlans   FloorPlan[]
+  applications Application[]
 
   @@unique([propertyId, label])
   @@map("units")
@@ -180,6 +182,7 @@ model RoommateGroup {
   invitations   GroupInvitation[]
   events        GroupEvent[]
   costEstimates CostEstimate[]
+  applications  Application[]
 
   @@index([term])
   @@map("roommate_groups")
@@ -269,4 +272,73 @@ model CostEstimate {
 
   @@index([userId, createdAt])
   @@map("cost_estimates")
+}
+
+// ---------------------------------------------------------------------------
+// Group applications (roadmap B3 part 2). The RULES (states, moves, who may make
+// each move, the offer deadline) live in src/services/application.workflow.js;
+// src/services/application.service.js applies them with locks and audit events.
+// ---------------------------------------------------------------------------
+
+/// Same values as STATES in application.workflow.js.
+enum ApplicationStatus {
+  SUBMITTED
+  DOCS_REQUESTED
+  UNDER_REVIEW
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  REJECTED
+  WITHDRAWN
+}
+
+/// Who made a move. Same values as ACTORS in application.workflow.js.
+enum ApplicationActor {
+  GROUP_MEMBER
+  LISTING_OWNER
+  SYSTEM
+}
+
+/// A roommate group's application for one unit.
+/// CHECK (added in the migration SQL): an OFFERED application must have a deadline.
+model Application {
+  id             String            @id @default(uuid()) @db.Uuid
+  groupId        String            @map("group_id") @db.Uuid
+  unitId         String            @map("unit_id") @db.Uuid
+  status         ApplicationStatus @default(SUBMITTED)
+  /// Accepted members when the group applied (the size that was checked against the unit).
+  groupSize      Int               @map("group_size")
+  /// Set by "make offer"; kept afterwards so the history still shows the deadline.
+  offerExpiresAt DateTime?         @map("offer_expires_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  group  RoommateGroup      @relation(fields: [groupId], references: [id])
+  unit   Unit               @relation(fields: [unitId], references: [id])
+  events ApplicationEvent[]
+
+  @@index([unitId, status])
+  @@index([groupId])
+  @@map("applications")
+}
+
+/// Append-only audit log: every status change, who made it, and an optional comment.
+model ApplicationEvent {
+  id            String             @id @default(uuid()) @db.Uuid
+  applicationId String             @map("application_id") @db.Uuid
+  /// Null for SYSTEM moves (an offer expiring).
+  actorId       String?            @map("actor_id") @db.Uuid
+  actorType     ApplicationActor   @map("actor_type")
+  /// Null for the first event (applying).
+  fromStatus    ApplicationStatus? @map("from_status")
+  toStatus      ApplicationStatus  @map("to_status")
+  comment       String?
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  application Application @relation(fields: [applicationId], references: [id])
+  actor       User?       @relation(fields: [actorId], references: [id])
+
+  @@index([applicationId, createdAt])
+  @@map("application_events")
 }

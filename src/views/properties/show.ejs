@@ -20,6 +20,7 @@
   <% property.units.forEach((u) => { %>
     <article class="unit">
       <h3><%= u.label %> <span class="badge"><%= u.status === 'AVAILABLE' ? 'Available' : 'Leased' %></span></h3>
+      <p><a href="/units/<%= u.id %>/applications">Applications</a></p>
       <p><%= u.bedrooms === 0 ? 'Studio' : u.bedrooms + ' bd' %> · <%= u.beds %> <%= u.beds === 1 ? 'bed' : 'beds' %> ·
         <%= u.bathrooms %> ba<% if (u.squareFeet) { %> · <%= u.squareFeet.toLocaleString('en-US') %> sq ft<% } %></p>
       <p><%= formatCents(u.rentCents) %>/month rent · <%= formatCents(u.utilitiesCents) %> utilities ·

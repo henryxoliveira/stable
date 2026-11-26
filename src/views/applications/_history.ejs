@@ -1,0 +1,11 @@
+<%# The audit trail of one application. Expects `application`, `STATE_LABELS`, `formatPacific`. %>
+<ol class="history">
+  <% application.events.forEach((e) => { %>
+    <li>
+      <time datetime="<%= new Date(e.createdAt).toISOString() %>"><%= formatPacific(e.createdAt) %></time> ·
+      <%= e.actorType === 'SYSTEM' ? 'Stable' : (e.actorEmail || 'someone') %>:
+      <%= e.fromStatus ? STATE_LABELS[e.fromStatus] + ' → ' : '' %><%= STATE_LABELS[e.toStatus] %>
+      <% if (e.comment) { %><span class="muted">: “<%= e.comment %>”</span><% } %>
+    </li>
+  <% }) %>
+</ol>
