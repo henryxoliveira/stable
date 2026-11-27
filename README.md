@@ -712,6 +712,7 @@ browser with its own cookies.
 | 87  | Anonymous admin page / API; admin POST without a CSRF token                                                   | anonymous, admin | 302 → `/login` / 401; 403 and nothing changes                                                                                       | ✅ pass (automated)         |
 | 88  | Promote a group owner and a group member; then each leaves and is promoted                                    | A, B, admin      | 409 `IN_ROOMMATE_GROUP` (no change, no event); then 200 each                                                                        | ✅ pass (automated)         |
 | 89  | Race ×5: student accepts a group invite while an admin promotes them                                          | A, B, admin      | accept 200 + promote 409, or promote 200 + accept 403                                                                               | ✅ pass (automated)         |
+| 104 | Student promoted after the role check but before the group service locks their row (accept, create group)     | A, B, admin      | 403; no membership; invite still pending                                                                                            | ✅ pass (automated)         |
 
 Latest run (local, 2026-11-25): **229 tests, 11 files, all passing.**
 

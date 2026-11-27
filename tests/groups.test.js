@@ -8,6 +8,7 @@ import { createUser, prisma, resetDb } from './helpers/db.js';
 import { getCsrfToken, login, newAgent, postForm, postJson, register } from './helpers/http.js';
 import {
   MAX_GROUP_SEATS,
+  acceptInvite as acceptDirect,
   createGroup as createGroupDirect,
   inviteByEmail as inviteDirect,
   upcomingTerms,
@@ -482,6 +483,29 @@ describe('accept vs. cancel / disband (ordering and races)', () => {
 });
 
 describe('authorization', () => {
+  // requireRole reads the role when the request starts. If an admin promotes the
+  // student before the service takes its row lock, the service must still refuse.
+  // Calling the service with the stale (pre-promotion) user makes the race deterministic.
+  it('a student promoted mid-request cannot accept an invite or create a group', async () => {
+    const amy = await student('amy@scu.edu');
+    await student('ben@scu.edu');
+    const groupId = await createGroup(amy);
+    await invite(amy, groupId, 'ben@scu.edu');
+    const inviteId = (await detail(amy, groupId)).pendingInvites[0].id;
+
+    const ben = await prisma.user.findUnique({ where: { email: 'ben@scu.edu' } });
+    const staleBen = { id: ben.id, email: ben.email, role: 'STUDENT' };
+    await prisma.user.update({ where: { id: ben.id }, data: { role: 'ADMIN' } });
+
+    await expect(acceptDirect(staleBen, inviteId)).rejects.toMatchObject({ status: 403 });
+    await expect(
+      createGroupDirect(staleBen, { name: 'Ben Place', term: NEXT_TERM }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(await prisma.groupMember.count({ where: { userId: ben.id } })).toBe(0);
+    const inv = await prisma.groupInvitation.findUnique({ where: { id: inviteId } });
+    expect(inv.status).toBe('PENDING');
+  });
+
   it('a stranger gets 404 on the page and every action', async () => {
     const amy = await student('amy@scu.edu');
     await student('ben@scu.edu');
