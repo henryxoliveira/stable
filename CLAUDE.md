@@ -108,6 +108,9 @@ only by group members, the listing owner, and admins. PENDING accounts can log i
 
 ## Workflows (server-enforced state machines)
 
+- **Landlord account:** `PENDING → ACTIVE | REJECTED`, decided by an admin (`src/services/admin.service.js`).
+  REJECTED can't log in (same as SUSPENDED). Admins can promote ACTIVE students/landlords to ADMIN.
+  Every decision writes an `account_events` row.
 - **Listing:** `draft → submitted → (changes_requested → submitted)* → approved | rejected`, and `approved → archived`.
   A comment is required for changes_requested. Only approved listings are visible to students and the map.
 - **Roommate group:** per term. Invite by email, accept or decline. One active group per student per term.

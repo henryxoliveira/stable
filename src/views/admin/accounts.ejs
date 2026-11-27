@@ -1,0 +1,66 @@
+<%- include('../partials/header', { title: 'Accounts' }) %>
+<p><a href="/dashboard/admin">← Admin dashboard</a></p>
+<h1>Accounts</h1>
+
+<% if (errors._form) { %><p class="alert" role="alert"><%= errors._form %></p><% } %>
+
+<section class="card">
+  <h2>Landlords waiting for approval</h2>
+  <p class="muted">Approved landlords can publish listings. Rejected landlords can't log in any more.</p>
+  <% if (pending.length === 0) { %>
+    <p class="muted">Nobody is waiting.</p>
+  <% } else { %>
+    <ul class="rows">
+      <% pending.forEach((landlord) => { %>
+        <li>
+          <span><%= landlord.email %>
+            <span class="muted">· registered <%= landlord.createdAt.toISOString().slice(0, 10) %></span></span>
+          <span class="actions">
+            <form method="post" action="/admin/landlords/<%= landlord.id %>/approve" class="inline">
+              <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+              <button type="submit" class="btn small">Approve</button>
+            </form>
+            <form method="post" action="/admin/landlords/<%= landlord.id %>/reject" class="inline">
+              <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+              <label class="visually-hidden" for="reason-<%= landlord.id %>">Reason (optional)</label>
+              <input id="reason-<%= landlord.id %>" name="reason" type="text" maxlength="500" placeholder="Reason (optional)">
+              <button type="submit" class="btn small secondary">Reject</button>
+            </form>
+          </span>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+  <%- include('../partials/field-error', { field: 'reason' }) %>
+</section>
+
+<section class="card">
+  <h2>Promote to admin</h2>
+  <p class="muted">Enter the email of an active student or landlord. Admins can approve accounts and
+    listings, so only promote people on the team.</p>
+  <form method="post" action="/admin/promote" novalidate>
+    <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" required value="<%= values.email || '' %>">
+    <%- include('../partials/field-error', { field: 'email' }) %>
+    <button type="submit" class="btn">Promote</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Recent decisions</h2>
+  <% if (events.length === 0) { %>
+    <p class="muted">No decisions yet.</p>
+  <% } else { %>
+    <ul class="rows">
+      <% events.forEach((event) => { %>
+        <li>
+          <span><%= event.actor.email %> <%= eventLabels[event.type] %> <%= event.target.email %>
+            <% if (event.comment) { %><span class="muted">· "<%= event.comment %>"</span><% } %></span>
+          <span class="muted"><%= event.createdAt.toISOString().slice(0, 16).replace('T', ' ') %> UTC</span>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+<%- include('../partials/footer') %>
