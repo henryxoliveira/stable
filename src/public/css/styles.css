@@ -275,3 +275,10 @@ h3 {
 .moves .move .btn {
   margin-top: 0;
 }
+/* Notifications (B6): unread rows in bold, the header badge in hay. */
+.notifications li.unread a {
+  font-weight: 700;
+}
+.badge.unread {
+  background: var(--hay);
+}

@@ -1,0 +1,34 @@
+<%- include('../partials/header', { title: 'Notifications' }) %>
+<h1>Notifications</h1>
+<p class="muted">What happened to your applications and groups, newest first. Only you can see these.</p>
+
+<section class="card">
+  <% if (notifications.length === 0) { %>
+    <p class="muted">No notifications yet.</p>
+  <% } else { %>
+    <% if (unread > 0) { %>
+      <form method="post" action="/notifications/read-all">
+        <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+        <button type="submit">Mark all as read (<%= unread %>)</button>
+      </form>
+    <% } %>
+    <ul class="rows notifications">
+      <% notifications.forEach((n) => { %>
+        <%# Messages can contain users' comments: always print them escaped (the equals tag), never raw (the dash tag). %>
+        <li class="<%= n.readAt ? '' : 'unread' %>">
+          <span>
+            <a href="<%= n.link %>"><%= n.message %></a><br>
+            <time class="muted" datetime="<%= n.createdAt.toISOString() %>"><%= formatPacific(n.createdAt) %></time>
+          </span>
+          <% if (!n.readAt) { %>
+            <form method="post" action="/notifications/<%= n.id %>/read" class="actions">
+              <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+              <button type="submit" class="link">Mark read</button>
+            </form>
+          <% } %>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+<%- include('../partials/footer') %>

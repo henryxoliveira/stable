@@ -12,6 +12,7 @@
     <a class="brand" href="/"><img src="/img/logo.svg" alt="" width="28" height="28"> Stable</a>
     <nav>
       <% if (locals.currentUser) { %>
+        <a href="/notifications">Notifications<% if (locals.unreadCount) { %> <span class="badge unread" aria-label="<%= unreadCount %> unread"><%= unreadCount %></span><% } %></a>
         <span class="muted"><%= currentUser.email %> (<%= currentUser.role.toLowerCase() %>)</span>
         <form method="post" action="/logout" class="inline">
           <input type="hidden" name="_csrf" value="<%= csrfToken() %>">

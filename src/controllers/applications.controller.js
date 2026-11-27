@@ -8,17 +8,7 @@ import { formatCents } from '../utils/money.js';
 import { STATE_LABELS } from '../services/application.workflow.js';
 import { HttpError } from '../utils/httpError.js';
 import { wantsJson } from '../utils/request.js';
-
-/** Show times on the campus calendar, e.g. "Mar 1, 2027, 5:00 PM Pacific". */
-export function formatPacific(date) {
-  if (!date) return '';
-  const text = new Date(date).toLocaleString('en-US', {
-    timeZone: 'America/Los_Angeles',
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-  return `${text} Pacific`;
-}
+import { formatPacific } from '../utils/time.js';
 
 const viewHelpers = { formatPacific, formatCents, STATE_LABELS, termLabel };
 
