@@ -717,7 +717,7 @@ browser with its own cookies.
 | 104 | Student promoted after the role check but before the group service locks their row (accept, create group)     | A, B, admin      | 403; no membership; invite still pending                                                                                            | ✅ pass (automated)         |
 | 105 | Promote a student with pending invites from two groups                                                        | A, C, B, admin   | ADMIN; both invites CANCELLED; both groups ready; history line names the reason                                                     | ✅ pass (automated)         |
 
-Latest run (CI, 2026-11-26): **230 tests, 11 files, all passing.**
+Latest run (CI, 2026-11-27): **231 tests, 11 files, all passing.**
 
 ## Security review
 
