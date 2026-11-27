@@ -714,7 +714,7 @@ browser with its own cookies.
 | 89  | Race ×5: student accepts a group invite while an admin promotes them                                          | A, B, admin      | accept 200 + promote 409, or promote 200 + accept 403                                                                               | ✅ pass (automated)         |
 | 104 | Student promoted after the role check but before the group service locks their row (accept, create group)     | A, B, admin      | 403; no membership; invite still pending                                                                                            | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-25): **229 tests, 11 files, all passing.**
+Latest run (CI, 2026-11-26): **230 tests, 11 files, all passing.**
 
 ## Security review
 
