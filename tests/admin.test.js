@@ -272,6 +272,41 @@ describe('promote to admin', () => {
     expect((await adminPost(admin, '/admin/promote', { email: 'amy@scu.edu' })).status).toBe(200);
   });
 
+  it('cancels pending invites on promotion, so the inviting groups can become ready', async () => {
+    const admin = await adminAgent();
+    const amy = await registered('amy@scu.edu', 'STUDENT');
+    const cal = await registered('cal@scu.edu', 'STUDENT');
+    const ben = await registered('ben@scu.edu', 'STUDENT');
+    const hilltop = await createGroup(amy, 'Hilltop House');
+    const elm = await createGroup(cal, 'Elm Street');
+    await inviteAndGetId(amy, hilltop, ben, 'ben@scu.edu');
+    await inviteAndGetId(cal, elm, ben, 'ben@scu.edu');
+    expect((await amy.get(`/api/groups/${hilltop}`)).body.ready).toBe(false);
+
+    // A pending invite doesn't block promotion (only membership does).
+    expect((await adminPost(admin, '/admin/promote', { email: 'ben@scu.edu' })).status).toBe(200);
+    expect((await userByEmail('ben@scu.edu')).role).toBe('ADMIN');
+
+    const invites = await prisma.groupInvitation.findMany({ where: { email: 'ben@scu.edu' } });
+    expect(invites.map((i) => i.status)).toEqual(['CANCELLED', 'CANCELLED']);
+
+    // Both owners see the group ready again, with a line in its history.
+    for (const [owner, groupId] of [
+      [amy, hilltop],
+      [cal, elm],
+    ]) {
+      const detail = (await owner.get(`/api/groups/${groupId}`)).body;
+      expect(detail.ready).toBe(true);
+      expect(detail.pendingInvites).toEqual([]);
+      const last = detail.events.at(-1);
+      expect(last.type).toBe('INVITE_CANCELLED');
+      expect(last.actor.email).toBe('admin@scu.edu');
+      expect(last.summary).toContain(
+        'ben@scu.edu was cancelled because they became a Stable admin',
+      );
+    }
+  });
+
   it('race: promote vs. accepting a group invite, never an admin stuck in a group', async () => {
     const admin = await adminAgent();
     const amy = await registered('amy@scu.edu', 'STUDENT');
@@ -314,6 +349,9 @@ describe('promote to admin', () => {
         expect(acc.status, label).toBe(403); // admins can't use student group routes
         expect(user.role, label).toBe('ADMIN');
         expect(memberships, label).toBe(0);
+        // The invite they never got to accept was cancelled, not left pending.
+        const invite = await prisma.groupInvitation.findUnique({ where: { id: inviteId } });
+        expect(invite.status, label).toBe('CANCELLED');
       }
     }
     console.info('promote vs. accept, 5 rounds:', tally);
