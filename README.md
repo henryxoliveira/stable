@@ -298,6 +298,8 @@ the first admin exist?
      can't be promoted, so an unapproved landlord can't skip the queue. A student who is in an active
      roommate group (as owner or member) can't be promoted either (`409 IN_ROOMMATE_GROUP`): admins get 403
      on group actions, so they could never leave or hand off the group. They leave it first, then get promoted.
+     Pending invitations don't block promotion: they are cancelled in the same transaction, with a line in
+     each group's history, so the inviting group can still become ready.
    - Each decision is one transaction: an `UPDATE … WHERE status = 'PENDING'` (or `role`/`status` for
      promotion) plus an `account_events` audit row. If two admins decide the same landlord at once, the
      second update matches no rows and gets `409 NOT_PENDING`, so only one decision is ever recorded.
@@ -713,6 +715,7 @@ browser with its own cookies.
 | 88  | Promote a group owner and a group member; then each leaves and is promoted                                    | A, B, admin      | 409 `IN_ROOMMATE_GROUP` (no change, no event); then 200 each                                                                        | ✅ pass (automated)         |
 | 89  | Race ×5: student accepts a group invite while an admin promotes them                                          | A, B, admin      | accept 200 + promote 409, or promote 200 + accept 403                                                                               | ✅ pass (automated)         |
 | 104 | Student promoted after the role check but before the group service locks their row (accept, create group)     | A, B, admin      | 403; no membership; invite still pending                                                                                            | ✅ pass (automated)         |
+| 105 | Promote a student with pending invites from two groups                                                        | A, C, B, admin   | ADMIN; both invites CANCELLED; both groups ready; history line names the reason                                                     | ✅ pass (automated)         |
 
 Latest run (CI, 2026-11-26): **230 tests, 11 files, all passing.**
 

@@ -197,6 +197,9 @@ export function describeEvent(event) {
     case 'INVITED':
       return `${who} invited ${d.email}`;
     case 'INVITE_CANCELLED':
+      if (d.reason === 'PROMOTED_TO_ADMIN') {
+        return `The invitation to ${d.email} was cancelled because they became a Stable admin`;
+      }
       return `${who} cancelled the invitation to ${d.email}`;
     case 'INVITE_ACCEPTED':
       return `${who} accepted the invitation`;

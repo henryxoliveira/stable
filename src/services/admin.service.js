@@ -99,12 +99,51 @@ export function rejectLandlord(admin, landlordId, reason) {
 }
 
 /**
+ * Cancel every pending roommate-group invitation for `email`, with an
+ * INVITE_CANCELLED row in each group's history. Called when a student becomes
+ * an admin: admins get 403 on group routes, so they could never answer the
+ * invite, and the group would never be "ready" (ready = no pending invites).
+ *
+ * Each group's row is locked first, in id order (the same lock the owner's
+ * invite/cancel and the invitee's accept/decline take), so this can't
+ * interleave with those actions, and two promotions can't deadlock.
+ * @param {import('@prisma/client').Prisma.TransactionClient} tx
+ * @param {{ id: string }} admin  the admin doing the promotion (event actor)
+ * @param {string} email  the promoted account's email (invites match by email)
+ */
+async function cancelPendingInvites(tx, admin, email) {
+  const pending = await tx.groupInvitation.findMany({
+    where: { email, status: 'PENDING' },
+    select: { groupId: true },
+    orderBy: { groupId: 'asc' },
+  });
+  for (const { groupId } of pending) {
+    await tx.$queryRaw`SELECT id FROM roommate_groups WHERE id = ${groupId}::uuid FOR UPDATE`;
+    // Re-check under the lock: the owner may have cancelled it meanwhile.
+    const { count } = await tx.groupInvitation.updateMany({
+      where: { groupId, email, status: 'PENDING' },
+      data: { status: 'CANCELLED', respondedAt: new Date() },
+    });
+    if (count === 0) continue;
+    await tx.groupEvent.create({
+      data: {
+        groupId,
+        actorId: admin.id,
+        type: 'INVITE_CANCELLED',
+        detail: { email, reason: 'PROMOTED_TO_ADMIN' },
+      },
+    });
+  }
+}
+
+/**
  * Make an existing ACTIVE student or landlord an admin.
  * 404 unknown email; 409 already an admin, the account isn't active
  * (approve a pending landlord first; suspended/rejected accounts stay out),
  * or the student is in an active roommate group. Admins get 403 on every
  * group action, so a promoted member could never leave, invite, or hand
- * off ownership, and a group they own would be stuck.
+ * off ownership, and a group they own would be stuck. Pending invitations
+ * (not yet accepted) are cancelled instead of blocking the promotion.
  * @param {{ id: string }} admin
  * @param {string} email  already trimmed and lowercased by zod
  */
@@ -142,6 +181,8 @@ export async function promoteToAdmin(admin, email) {
       data: { role: 'ADMIN' },
     });
     if (count === 0) throw conflict('That account just changed. Reload and try again.');
+
+    await cancelPendingInvites(tx, admin, user.email);
 
     await tx.accountEvent.create({
       data: {
