@@ -1,0 +1,24 @@
+<%- include('../partials/header', { title: plan ? 'Edit floor plan' : 'Add a floor plan' }) %>
+<p><a href="/properties/<%= unit.property.id %>">← <%= unit.property.name %></a></p>
+<h1><%= plan ? 'Edit ' + plan.name : 'Add a floor plan to ' + unit.label %></h1>
+<% if (errors._form) { %><p class="alert" role="alert"><%= errors._form %></p><% } %>
+<p class="muted">Uploading the floor plan image comes in a later update.</p>
+
+<form method="post" action="<%= plan ? '/floor-plans/' + plan.id : '/units/' + unit.id + '/floor-plans' %>" class="card" novalidate>
+  <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
+
+  <label for="name">Name</label>
+  <input id="name" name="name" type="text" maxlength="60" required placeholder="e.g. Main floor" value="<%= values.name || '' %>">
+  <%- include('../partials/field-error', { field: 'name' }) %>
+
+  <label for="squareFeet">Square feet (optional)</label>
+  <input id="squareFeet" name="squareFeet" type="number" min="1" step="1" value="<%= values.squareFeet ?? '' %>">
+  <%- include('../partials/field-error', { field: 'squareFeet' }) %>
+
+  <label for="notes">Notes (optional)</label>
+  <textarea id="notes" name="notes" maxlength="1000" rows="3"><%= values.notes || '' %></textarea>
+  <%- include('../partials/field-error', { field: 'notes' }) %>
+
+  <button type="submit" class="btn"><%= plan ? 'Save changes' : 'Add floor plan' %></button>
+</form>
+<%- include('../partials/footer') %>

@@ -7,9 +7,16 @@ import * as auth from '../controllers/auth.controller.js';
 import * as costs from '../controllers/costs.controller.js';
 import * as dashboard from '../controllers/dashboard.controller.js';
 import * as groups from '../controllers/groups.controller.js';
+import * as props from '../controllers/properties.controller.js';
 import * as listings from '../controllers/listings.controller.js';
 import * as admin from '../controllers/admin.controller.js';
 import { requireActiveAccount, requireRole } from '../middleware/auth.js';
+import {
+  floorPlanSchema,
+  idParams,
+  propertySchema,
+  unitSchema,
+} from '../validation/property.schemas.js';
 import { validate } from '../middleware/validate.js';
 import { z } from 'zod';
 import { promoteSchema, rejectSchema, userIdParams } from '../validation/admin.schemas.js';
@@ -67,6 +74,68 @@ router.post(
   requireActiveAccount,
   validate(z.object({ id: z.uuid() }), { source: 'params' }),
   listings.submitForApproval,
+);
+
+// Properties, units, floor plans (A2). Landlords (pending ones too) create and
+// edit their OWN; admins may view all but not edit (403); students get 403.
+// Ownership (404 for other landlords) is checked in services/property.service.js.
+// `/properties/new` is registered before `/properties/:id` so "new" isn't read as an id.
+const landlord = requireRole('LANDLORD');
+const landlordOrAdmin = requireRole('LANDLORD', 'ADMIN');
+const id = validate(idParams, { source: 'params' });
+
+router.get('/properties', landlordOrAdmin, props.index);
+router.get('/api/properties', landlordOrAdmin, props.apiIndex);
+router.get('/properties/new', landlord, props.newProperty);
+router.post(
+  '/properties',
+  landlord,
+  validate(propertySchema, { view: props.propertyInvalid }),
+  props.createProperty,
+);
+router.get('/properties/:id', landlordOrAdmin, id, props.show);
+router.get('/api/properties/:id', landlordOrAdmin, id, props.apiShow);
+router.get('/properties/:id/edit', landlord, id, props.editProperty);
+router.post(
+  '/properties/:id',
+  landlord,
+  id,
+  validate(propertySchema, { view: props.propertyInvalid }),
+  props.updateProperty,
+);
+
+router.get('/properties/:id/units/new', landlord, id, props.newUnit);
+router.post(
+  '/properties/:id/units',
+  landlord,
+  id,
+  validate(unitSchema, { view: props.newUnitInvalid }),
+  props.createUnit,
+);
+router.get('/units/:id/edit', landlord, id, props.editUnit);
+router.post(
+  '/units/:id',
+  landlord,
+  id,
+  validate(unitSchema, { view: props.editUnitInvalid }),
+  props.updateUnit,
+);
+
+router.get('/units/:id/floor-plans/new', landlord, id, props.newFloorPlan);
+router.post(
+  '/units/:id/floor-plans',
+  landlord,
+  id,
+  validate(floorPlanSchema, { view: props.newFloorPlanInvalid }),
+  props.createFloorPlan,
+);
+router.get('/floor-plans/:id/edit', landlord, id, props.editFloorPlan);
+router.post(
+  '/floor-plans/:id',
+  landlord,
+  id,
+  validate(floorPlanSchema, { view: props.editFloorPlanInvalid }),
+  props.updateFloorPlan,
 );
 
 // Roommate groups (B1). Only students use these routes; admins may VIEW any group.

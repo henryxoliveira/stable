@@ -1,14 +1,10 @@
 /**
  * Unit tests for the pure cost calculator math (no database, no HTTP).
+ * Parsing and formatting amounts is tested in money.test.js.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  MAX_AMOUNT_CENTS,
-  computeEstimate,
-  formatCents,
-  parseDollarsToCents,
-  splitCents,
-} from '../src/services/cost.service.js';
+import { computeEstimate, splitCents } from '../src/services/cost.service.js';
+import { formatCents } from '../src/utils/money.js';
 import { MAX_GROUP_SEATS } from '../src/config/limits.js';
 
 const base = {
@@ -67,54 +63,6 @@ describe('splitCents()', () => {
   });
 });
 
-describe('parseDollarsToCents()', () => {
-  it.each([
-    ['4000', 400000],
-    ['4000.5', 400050],
-    ['4000.50', 400050],
-    ['4,000', 400000],
-    ['$4,000.50', 400050],
-    ['$4000', 400000],
-    ['  1250.05  ', 125005],
-    ['0', 0],
-    ['0.01', 1],
-    ['12,345.67', 1234567],
-    ['100000', MAX_AMOUNT_CENTS],
-    ['$100,000.00', MAX_AMOUNT_CENTS],
-  ])('accepts %j → %i cents', (input, cents) => {
-    expect(parseDollarsToCents(input)).toEqual({ cents });
-  });
-
-  it.each([
-    ['', /Enter an amount/],
-    ['   ', /Enter an amount/],
-    [undefined, /Enter an amount/],
-    ['-5', /negative/],
-    ['--5', /negative/],
-    ['$-5', /negative/],
-    ['4000.505', /at most 2 digits/],
-    ['4000.123', /at most 2 digits/],
-    ['40a0', /like 1250 or 1250\.50/],
-    ['abc', /like 1250 or 1250\.50/],
-    ['4,00', /like 1250 or 1250\.50/],
-    ['40,00,000', /like 1250 or 1250\.50/],
-    ['1.2.3', /like 1250 or 1250\.50/],
-    ['.50', /like 1250 or 1250\.50/],
-    ['4000.', /like 1250 or 1250\.50/],
-    ['$', /like 1250 or 1250\.50/],
-    ['$$4000', /like 1250 or 1250\.50/],
-    ['4000$', /like 1250 or 1250\.50/],
-    ['1e5', /like 1250 or 1250\.50/],
-    ['100000.01', /more than \$100,000/],
-    ['$100,001', /more than \$100,000/],
-    ['99999999999999999999', /more than \$100,000/],
-  ])('rejects %j with a plain-English message', (input, message) => {
-    const result = parseDollarsToCents(input);
-    expect(result.cents).toBeUndefined();
-    expect(result.error).toMatch(message);
-  });
-});
-
 describe('computeEstimate(): on- vs. off-campus', () => {
   // $3,000 + $150 + $50 = $3,200/month for 3 people → shares 106667, 106667, 106666.
   const offCampus = { ...base, rentCents: 300000, utilitiesCents: 15000, parkingCents: 5000 };
@@ -150,14 +98,5 @@ describe('computeEstimate(): on- vs. off-campus', () => {
 
   it('skips the comparison when no on-campus cost is entered', () => {
     expect(computeEstimate(offCampus).comparison).toBeNull();
-  });
-});
-
-describe('formatCents()', () => {
-  it('formats with commas and 2 decimals using integer math', () => {
-    expect(formatCents(0)).toBe('$0.00');
-    expect(formatCents(5)).toBe('$0.05');
-    expect(formatCents(10000000)).toBe('$100,000.00');
-    expect(formatCents(-133334)).toBe('-$1,333.34');
   });
 });

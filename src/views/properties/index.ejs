@@ -1,0 +1,27 @@
+<%- include('../partials/header', { title: 'Properties' }) %>
+<h1>Properties</h1>
+<% const isAdmin = currentUser.role === 'ADMIN'; %>
+<% if (isAdmin) { %>
+  <p class="muted">Every landlord's properties, for oversight. Only the owner can edit them.</p>
+<% } else { %>
+  <p class="muted">Your buildings and houses. Add units and floor plans to each one, then list them for
+    students once listings are available.</p>
+  <p><a class="btn" href="/properties/new">Add a property</a></p>
+<% } %>
+
+<section class="card">
+  <% if (properties.length === 0) { %>
+    <p class="muted"><%= isAdmin ? 'No properties yet.' : "You haven't added a property yet." %></p>
+  <% } else { %>
+    <ul class="rows">
+      <% properties.forEach((p) => { %>
+        <li>
+          <span><a href="/properties/<%= p.id %>"><%= p.name %></a>
+            <span class="muted">· <%= p.address %>, <%= p.city %></span></span>
+          <span class="muted"><%= p._count.units %> <%= p._count.units === 1 ? 'unit' : 'units' %><% if (isAdmin) { %> · <%= p.owner.email %><% } %></span>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+<%- include('../partials/footer') %>

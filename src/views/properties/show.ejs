@@ -1,0 +1,44 @@
+<%- include('../partials/header', { title: property.name }) %>
+<% const isOwner = currentUser.id === property.ownerId; %>
+<p><a href="/properties">← All properties</a></p>
+<h1><%= property.name %></h1>
+<p><%= property.address %>, <%= property.city %>, <%= property.state %> <%= property.postalCode %></p>
+<% if (currentUser.role === 'ADMIN') { %><p class="muted">Owner: <%= property.owner.email %></p><% } %>
+<% if (property.latitude !== null) { %>
+  <p class="muted">Location: <%= property.latitude %>, <%= property.longitude %></p>
+<% } else { %>
+  <p class="muted">No map location yet.</p>
+<% } %>
+<% if (property.description) { %><p><%= property.description %></p><% } %>
+<% if (isOwner) { %><p><a class="btn secondary" href="/properties/<%= property.id %>/edit">Edit property</a></p><% } %>
+
+<section class="card">
+  <h2>Units</h2>
+  <% if (property.units.length === 0) { %>
+    <p class="muted">No units yet.</p>
+  <% } %>
+  <% property.units.forEach((u) => { %>
+    <article class="unit">
+      <h3><%= u.label %> <span class="badge"><%= u.status === 'AVAILABLE' ? 'Available' : 'Leased' %></span></h3>
+      <p><%= u.bedrooms === 0 ? 'Studio' : u.bedrooms + ' bd' %> · <%= u.beds %> <%= u.beds === 1 ? 'bed' : 'beds' %> ·
+        <%= u.bathrooms %> ba<% if (u.squareFeet) { %> · <%= u.squareFeet.toLocaleString('en-US') %> sq ft<% } %></p>
+      <p><%= formatCents(u.rentCents) %>/month rent · <%= formatCents(u.utilitiesCents) %> utilities ·
+        <%= formatCents(u.parkingCents) %> parking</p>
+      <% if (u.floorPlans.length > 0) { %>
+        <p class="muted">Floor plans:</p>
+        <ul>
+          <% u.floorPlans.forEach((f) => { %>
+            <li><%= f.name %><% if (f.squareFeet) { %> · <%= f.squareFeet.toLocaleString('en-US') %> sq ft<% } %>
+              <% if (f.notes) { %><span class="muted">· <%= f.notes %></span><% } %>
+              <% if (isOwner) { %>· <a href="/floor-plans/<%= f.id %>/edit">Edit</a><% } %></li>
+          <% }) %>
+        </ul>
+      <% } %>
+      <% if (isOwner) { %>
+        <p><a href="/units/<%= u.id %>/edit">Edit unit</a> · <a href="/units/<%= u.id %>/floor-plans/new">Add a floor plan</a></p>
+      <% } %>
+    </article>
+  <% }) %>
+  <% if (isOwner) { %><p><a class="btn" href="/properties/<%= property.id %>/units/new">Add a unit</a></p><% } %>
+</section>
+<%- include('../partials/footer') %>
