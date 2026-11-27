@@ -75,7 +75,7 @@ Status key: ✅ done · 🚧 in progress · ⬜ planned
 | Offer acceptance with row locking; competing applications auto-closed                 | ✅     |
 | Cost calculator: per-person rent, utilities, and parking, on- vs. off-campus          | ✅     |
 | Student subleases (same approval and application flow)                                | ⬜     |
-| In-app notifications                                                                  | ⬜     |
+| In-app notifications                                                                  | ✅     |
 | (Optional) AI lease summary                                                           | ⬜     |
 | (Stretch) On-campus room selection with time slots                                    | ⬜     |
 
@@ -280,6 +280,27 @@ Rules:
   never both hold the same unit.
 - Every state change writes an `application_events` row (who, what, when, comment).
 
+### Notifications (B6 part 1)
+
+Each notification is written **in the same transaction** as the event that causes it, so it exists exactly when
+the event does. Nobody is notified about their own action. There is no email.
+
+| What happened                                                         | Who is notified                                                                    |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| A group applies                                                       | The unit's landlord                                                                |
+| Landlord requests documents, starts review, offers, rescinds, rejects | Each member of the group (the offer shows its deadline)                            |
+| Group sends documents, withdraws, or declines an offer                | The landlord                                                                       |
+| A group accepts an offer                                              | The landlord, and the group's other members                                        |
+| Accepting closes another application                                  | That group's members, with the reason; and its landlord if it was for another unit |
+| An offer expires                                                      | Each member of the group, and the landlord                                         |
+| A student is invited to a group                                       | The invited student, if an account with that email already exists                  |
+
+Comments are included in the message, quoted. The header shows an unread count. `/notifications` lists the
+latest 100, newest first, with "Mark read" and "Mark all as read". Every query filters on the logged-in user,
+so someone else's notification is a 404. Links are always paths on this site (one `/`, never `//` or a full
+URL), checked in code and by a CHECK constraint. Messages are always shown escaped, since they can contain
+user comments.
+
 ### D. On-campus room selection (stretch goal)
 
 The admin opens a selection window, and students get time slots by priority (class year, then a random
@@ -444,7 +465,8 @@ button). Only students reach this route; landlords and admins get 403.
 5. **Write:** the unit becomes `LEASED`, the application `ACCEPTED`, with an event for the student.
 6. **Close what's now impossible**, each with a `SYSTEM` event: every other open application for this unit ("This
    unit was leased to another group"), and every other open application from this group ("Your group accepted
-   another place"). Each close goes through `canTransition(…, CLOSED, SYSTEM)`.
+   another place"). Each close goes through `canTransition(…, CLOSED, SYSTEM)`. The notifications (landlord,
+   the rest of the group, each closed group) are written here too, in the same transaction.
 7. **Commit.** A second accept for the same unit waits on the unit lock, then finds the unit leased (or its own
    application closed) and gets a clean 409. **Two groups can never both hold the unit.** A group that has
    accepted a place can't open new applications (409 `GROUP_ALREADY_PLACED`).
@@ -453,8 +475,8 @@ button). Only students reach this route; landlords and admins get 403.
 ## Data model
 
 **Implemented now** (`prisma/schema.prisma`, migrations `20261102000000_init`, `20261110030323_roommate_groups`,
-`20261124073118_cost_estimates`, `20261125025154_properties_units_floor_plans`, `20261126065226_applications`, and
-`20261126075425_application_closed`):
+`20261124073118_cost_estimates`, `20261125025154_properties_units_floor_plans`, `20261126065226_applications`,
+`20261126075425_application_closed`, and `20261126180000_notifications`):
 
 | Table     | Columns                                                                                                                                                                 | Notes                        |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
@@ -526,6 +548,17 @@ erDiagram
     users |o--o{ application_events : "made the move"
 ```
 
+**Notifications** (migration `20261126180000_notifications`):
+
+| Table           | Columns                                                                                                                              | Notes                                                                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `notifications` | `id`, `user_id` → users, `type`, `message` (plain English), `link` (a path on this site), `read_at` (empty until read), `created_at` | Only the user can read or mark it. Deleted with the user. Indexes `(user_id, created_at)` and `(user_id, read_at)`. CHECK: `link` is an internal path. |
+
+```mermaid
+erDiagram
+    users ||--o{ notifications : receives
+```
+
 **Planned** (each one will arrive in a migration in the PR that needs it):
 
 ```mermaid
@@ -536,7 +569,6 @@ erDiagram
     listings ||--o{ photos : has
     users ||--o{ saved_listings : saves
     applications ||--o{ application_documents : has
-    users ||--o{ notifications : receives
 ```
 
 Key fields (planned): `listings(status, kind off_campus|on_campus|sublease, owner_id)`.
@@ -815,8 +847,17 @@ browser with its own cookies.
 | 133 | Open the apply page for a unit that isn't available                                                           | A                | no Submit button; a short note instead                                                                                              | ✅ pass (automated)         |
 | 134 | Term shown on the applications pages and the group page                                                       | A                | friendly label ("Fall 2026"), never the raw value                                                                                   | ✅ pass (automated)         |
 | 135 | History after an offer, and after rescinding and offering again                                               | A, L             | the latest "Offer made" line shows its deadline                                                                                     | ✅ pass (automated)         |
+| 136 | Each trigger: apply, every landlord and group move, accept and what it closes, an offer expiring              | A, B, S, L, Lia  | the right people get exactly one each; nobody gets one for their own action                                                         | ✅ pass (automated)         |
+| 137 | Invite an email that has an account, and one that doesn't                                                     | A                | a notification only for the account; the owner gets the same response either way                                                    | ✅ pass (automated)         |
+| 138 | A refused move; a transaction that fails after writing a notification                                         | S, L             | no notification is left behind                                                                                                      | ✅ pass (automated)         |
+| 139 | Links `//x`, `https://x`, `/\x`, `javascript:…` (in code, and straight into the database)                     | none             | refused by the code and by the CHECK constraint                                                                                     | ✅ pass (automated)         |
+| 140 | Notifications page, header badge, and `/api/notifications`                                                    | A, B, L          | newest first, only my own, the unread count in the header                                                                           | ✅ pass (automated)         |
+| 141 | A comment containing HTML, shown on the notifications page                                                    | A, L             | shown as text (escaped), never as markup                                                                                            | ✅ pass (automated)         |
+| 142 | Mark one read (form, API, twice), then mark all                                                               | A, B, L          | only my own change; marking twice keeps the first read time                                                                         | ✅ pass (automated)         |
+| 143 | Mark someone else's notification read; a missing id                                                           | A, Lia           | 404; theirs stays unread                                                                                                            | ✅ pass (automated)         |
+| 144 | Bad id, no CSRF token, logged out (anonymous); an admin's page                                                | A, L, admin      | 400 / 403 / redirect to login; the admin's page is empty                                                                            | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-26): **290 tests, 14 files, all passing.**
+Latest run (local, 2026-11-26): **305 tests, 15 files, all passing.**
 
 ## Security review
 
@@ -862,8 +903,11 @@ when Prisma 6.x or ESLint ship patched releases.
   can be applied to. Once A3 lands, only units with an approved listing will accept applications.
 - Offers expire when someone next looks at the application (or tries to act on it), not on a timer. Nobody
   sees the old status, but the expiry is recorded at that moment, not exactly at the deadline.
-- No notifications yet (B6): when a group accepts, the landlord and the groups whose applications were closed
-  only see it on their pages, not by email or an alert.
+- Notifications are in-app only (no email), and a page shows new ones only after it's reloaded. The page lists
+  the latest 100.
+- An invite notifies only a student who already has an account. Someone who registers later still sees the
+  invite on their groups page, but gets no notification for it.
+- Student subleases (B6 part 2) wait for listings (A3), since a sublease is a listing a student owns.
 - A leased unit stays leased. There's no lease end date or "cancel the lease" action yet, so a unit can't become
   available again through the app.
 - TODO: add more as features land.
@@ -909,4 +953,4 @@ the application state machine, offers, and the cost calculator.
 | A3. Listing state machine + admin review queue with comments                   | ✅ B3. Application schema + state machine + `application_events`                     |
 | A4. GCS uploads (multer memory, type/size checks) for floor plans and photos   | ✅ B4. Landlord review actions (document upload comes with A4)                       |
 | A5. Map page (Leaflet, vendored) + JSON endpoint + haversine and price filters | ✅ B5. Accept offer with a transaction and `FOR UPDATE`; auto-close the rest; expiry |
-| A6. Seeded demo listings (`seed:demo`) + saved listings                        | B6. In-app notifications + student subleases                                         |
+| A6. Seeded demo listings (`seed:demo`) + saved listings                        | ✅ B6 part 1. In-app notifications · part 2: student subleases (after A3)            |

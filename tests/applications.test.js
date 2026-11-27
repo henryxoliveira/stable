@@ -11,7 +11,7 @@ import { createUser, prisma, resetDb } from './helpers/db.js';
 import { newAgent, postForm } from './helpers/http.js';
 import { expireDueOffers, move } from '../src/services/application.service.js';
 import { termLabel } from '../src/services/group.service.js';
-import { formatPacific } from '../src/controllers/applications.controller.js';
+import { formatPacific } from '../src/utils/time.js';
 import {
   MISSING_ID,
   NEXT_TERM,

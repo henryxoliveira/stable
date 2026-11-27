@@ -23,7 +23,9 @@
  * application past its deadline becomes EXPIRED with a SYSTEM event. Exactly at the
  * deadline counts as expired (same rule as isOfferExpired()).
  *
- * Every status change writes an application_events row in the same transaction.
+ * Every status change writes an application_events row in the same transaction,
+ * and the in-app notifications it causes (notification.service.js) in that same
+ * transaction too.
  */
 import { prisma } from '../db/prisma.js';
 import { HttpError, badRequest, conflict, forbidden, notFound } from '../utils/httpError.js';
@@ -37,6 +39,13 @@ import {
   groupFitsUnit,
 } from './application.workflow.js';
 import { isReady, lockGroupForApplying } from './group.service.js';
+import {
+  NOTIFICATION_TYPES as N,
+  groupMemberIds,
+  notify,
+  withComment,
+} from './notification.service.js';
+import { formatPacific } from '../utils/time.js';
 
 /** Longest an offer may stay open. */
 export const MAX_OFFER_DAYS = 14;
@@ -177,10 +186,105 @@ export async function expireDueOffers(where, now = new Date()) {
           comment: 'The offer deadline passed.',
         },
       });
+      // The system did this, so nobody is left out: the group and the landlord.
+      const c = await noticeContext(tx, app.id);
+      await notify(tx, {
+        recipientIds: c.memberIds,
+        type: N.OFFER_EXPIRED,
+        message: `The offer for ${c.place} expired: the deadline passed.`,
+        link: c.groupLink,
+      });
+      await notify(tx, {
+        recipientIds: [c.landlordId],
+        type: N.OFFER_EXPIRED,
+        message: `Your offer to ${c.groupName} for ${c.place} expired: the deadline passed.`,
+        link: c.landlordLink,
+      });
       expired += 1;
     }, TX_OPTIONS);
   }
   return expired;
+}
+
+// ---------------------------------------------------------------------------
+// Notifications: who hears about what (written in the caller's transaction)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a notification about one application needs: names for the message, who
+ * the landlord and the group members are, and where each side's link goes.
+ */
+async function noticeContext(tx, applicationId) {
+  const app = await tx.application.findUnique({
+    where: { id: applicationId },
+    select: {
+      id: true,
+      groupId: true,
+      unitId: true,
+      group: { select: { name: true } },
+      unit: { select: { label: true, property: { select: { name: true, ownerId: true } } } },
+    },
+  });
+  return {
+    groupName: app.group.name,
+    place: `unit ${app.unit.label} at ${app.unit.property.name}`,
+    landlordId: app.unit.property.ownerId,
+    memberIds: await groupMemberIds(tx, app.groupId),
+    groupLink: `/applications/${app.id}`,
+    landlordLink: `/units/${app.unitId}/applications`,
+  };
+}
+
+/** The notification for each move, by slug. Landlord moves go to the group, group moves to the landlord. */
+const MOVE_NOTICES = Object.freeze({
+  'request-documents': {
+    type: N.DOCUMENTS_REQUESTED,
+    text: (c) => `The landlord asked ${c.groupName} for documents for ${c.place}.`,
+  },
+  'start-review': {
+    type: N.REVIEW_STARTED,
+    text: (c) => `The landlord started reviewing ${c.groupName}’s application for ${c.place}.`,
+  },
+  offer: {
+    type: N.OFFER_MADE,
+    text: (c, deadline) =>
+      `${c.groupName} has an offer for ${c.place}, open until ${formatPacific(deadline)}.`,
+  },
+  rescind: {
+    type: N.OFFER_RESCINDED,
+    text: (c) => `The landlord rescinded the offer to ${c.groupName} for ${c.place}.`,
+  },
+  reject: {
+    type: N.APPLICATION_REJECTED,
+    text: (c) => `The landlord rejected ${c.groupName}’s application for ${c.place}.`,
+  },
+  'send-documents': {
+    type: N.DOCUMENTS_SENT,
+    text: (c) => `${c.groupName} sent the documents you asked for (${c.place}).`,
+  },
+  withdraw: {
+    type: N.APPLICATION_WITHDRAWN,
+    text: (c) => `${c.groupName} withdrew its application for ${c.place}.`,
+  },
+  decline: {
+    type: N.OFFER_DECLINED,
+    text: (c) => `${c.groupName} declined your offer for ${c.place}.`,
+  },
+});
+
+/** Notify the other side about a move that was just made in `tx`. */
+async function notifyMove(tx, { user, id, slug, comment, deadline }) {
+  const def = MOVES[slug];
+  const notice = MOVE_NOTICES[slug];
+  const c = await noticeContext(tx, id);
+  const toGroup = def.actor === ACTORS.LISTING_OWNER;
+  await notify(tx, {
+    recipientIds: toGroup ? c.memberIds : [c.landlordId],
+    actorId: user.id,
+    type: notice.type,
+    message: withComment(notice.text(c, deadline), comment),
+    link: toGroup ? c.groupLink : c.landlordLink,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -414,6 +518,14 @@ export async function apply(user, unitId, groupId, now = new Date()) {
         toStatus: STATES.SUBMITTED,
       },
     });
+    const c = await noticeContext(tx, app.id);
+    await notify(tx, {
+      recipientIds: [c.landlordId],
+      actorId: user.id,
+      type: N.APPLICATION_SUBMITTED,
+      message: `${c.groupName} (${g.memberCount} people) applied for ${c.place}.`,
+      link: c.landlordLink,
+    });
     return { id: app.id, status: app.status, unitId, groupId };
   }, TX_OPTIONS);
 }
@@ -516,6 +628,13 @@ export async function move(user, id, slug, input = {}, now = new Date()) {
         toStatus: def.to,
         comment: input.comment ?? null,
       },
+    });
+    await notifyMove(tx, {
+      user,
+      id,
+      slug,
+      comment: input.comment,
+      deadline: updated.offerExpiresAt,
     });
     return {
       id,
@@ -625,6 +744,21 @@ async function acceptInTx(tx, user, id, now) {
       toStatus: STATES.ACCEPTED,
     },
   });
+  const c = await noticeContext(tx, id);
+  await notify(tx, {
+    recipientIds: [c.landlordId],
+    actorId: user.id,
+    type: N.OFFER_ACCEPTED,
+    message: `${c.groupName} accepted your offer for ${c.place}. The unit is now leased.`,
+    link: c.landlordLink,
+  });
+  await notify(tx, {
+    recipientIds: c.memberIds, // the rest of the group (notify() leaves out whoever accepted)
+    actorId: user.id,
+    type: N.OFFER_ACCEPTED,
+    message: `${user.email} accepted the offer for ${c.place} for ${c.groupName}.`,
+    link: c.groupLink,
+  });
 
   // Close everything else this acceptance makes impossible.
   const others = await tx.application.findMany({
@@ -649,7 +783,36 @@ async function acceptInTx(tx, user, id, now) {
         comment: other.unitId === app.unitId ? CLOSE_REASON_UNIT_LEASED : CLOSE_REASON_GROUP_PLACED,
       },
     });
+    await notifyClosed(tx, user, other, app);
   }
 
   return { id, status: STATES.ACCEPTED, unitId: app.unitId, closed: others.length };
+}
+
+/**
+ * Tell people about one application that accepting `accepted` just closed:
+ *   - the closed application's group members, with the reason (minus whoever accepted);
+ *   - its landlord too, when it's for ANOTHER unit (the accepted unit's landlord
+ *     already got "offer accepted").
+ */
+async function notifyClosed(tx, user, closed, accepted) {
+  const c = await noticeContext(tx, closed.id);
+  const sameUnit = closed.unitId === accepted.unitId;
+  const reason = sameUnit ? CLOSE_REASON_UNIT_LEASED : CLOSE_REASON_GROUP_PLACED;
+  await notify(tx, {
+    recipientIds: c.memberIds,
+    actorId: user.id,
+    type: N.APPLICATION_CLOSED,
+    message: `Your group’s application for ${c.place} was closed: ${reason.toLowerCase()}.`,
+    link: c.groupLink,
+  });
+  if (!sameUnit) {
+    await notify(tx, {
+      recipientIds: [c.landlordId],
+      actorId: user.id,
+      type: N.APPLICATION_CLOSED,
+      message: `${c.groupName}’s application for ${c.place} was closed: the group accepted another place.`,
+      link: c.landlordLink,
+    });
+  }
 }

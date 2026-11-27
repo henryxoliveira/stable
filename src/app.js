@@ -3,7 +3,7 @@
  *
  * ORDER MATTERS. Read top to bottom to see what every request goes through:
  *   security headers → static files → /health → body parsing → session →
- *   load user → CSRF → PUBLIC routes → requireLogin → protected routes → errors
+ *   load user (+ unread count) → CSRF → PUBLIC routes → requireLogin → protected routes → errors
  */
 import express from 'express';
 import helmet from 'helmet';
@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sessionMiddleware } from './middleware/session.js';
 import { loadUser, requireLogin } from './middleware/auth.js';
+import { loadUnreadCount } from './middleware/notifications.js';
 import { csrfProtection, exposeCsrfToken } from './middleware/csrf.js';
 import { errorHandler, notFoundHandler } from './middleware/errors.js';
 import publicRoutes from './routes/public.routes.js';
@@ -42,6 +43,7 @@ export function createApp() {
   // --- Session, current user, CSRF ---
   app.use(sessionMiddleware);
   app.use(loadUser);
+  app.use(loadUnreadCount); // header badge (logged-in users only)
   app.use(csrfProtection);
   app.use(exposeCsrfToken);
 

@@ -26,6 +26,7 @@
 import { prisma } from '../db/prisma.js';
 import { badRequest, conflict, forbidden, notFound } from '../utils/httpError.js';
 import { MAX_GROUP_SEATS } from '../config/limits.js';
+import { NOTIFICATION_TYPES, notify } from './notification.service.js';
 
 /** Seats = accepted members + pending invitations (defined in config/limits.js). */
 export { MAX_GROUP_SEATS };
@@ -389,8 +390,10 @@ export async function createGroup(user, { name, term }) {
 
 /**
  * Owner invites an email address. The result never depends on whether that
- * email has an account (we never look at the users table for it), so inviting
- * cannot be used to discover who is registered.
+ * email has an account, so inviting cannot be used to discover who is registered.
+ * The users table is read for one thing only: if a STUDENT account has that email,
+ * it gets an in-app notification (same transaction). The response to the owner is
+ * identical either way.
  */
 export async function inviteByEmail(user, groupId, email) {
   return prisma.$transaction(async (tx) => {
@@ -428,6 +431,18 @@ export async function inviteByEmail(user, groupId, email) {
       : await tx.groupInvitation.create({ data: { ...fields, groupId, email } });
 
     await logEvent(tx, { groupId, actorId: user.id, type: 'INVITED', detail: { email } });
+
+    const invitee = await tx.user.findFirst({
+      where: { email, role: 'STUDENT' },
+      select: { id: true },
+    });
+    await notify(tx, {
+      recipientIds: [invitee?.id],
+      actorId: user.id,
+      type: NOTIFICATION_TYPES.GROUP_INVITE,
+      message: `${user.email} invited you to join the roommate group ${access.group.name} (${termLabel(access.group.term)}).`,
+      link: '/groups',
+    });
     return { id: invite.id, email: invite.email, status: invite.status };
   }, TX_OPTIONS);
 }

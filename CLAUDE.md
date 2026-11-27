@@ -121,7 +121,7 @@ only by group members, the listing owner, and admins. PENDING accounts can log i
   **Accept** = one transaction, locks group → unit → application (`SELECT … FOR UPDATE`): re-check the group is
   ready, fits, and the unit is AVAILABLE with an ACTIVE landlord; mark the unit leased; set every other open
   application for the unit, and every other open application from the group, to `CLOSED` (a SYSTEM-only final
-  state), each with an event (notifications later). Two groups can never hold the same unit.
+  state), each with an event and its notifications (same transaction). Two groups can never hold the same unit.
 - **On-campus room selection:** stretch goal. Skip unless the team asks.
 
 ## Back-end capabilities to build (keep them testable in services/)

@@ -10,6 +10,7 @@ import * as dashboard from '../controllers/dashboard.controller.js';
 import * as groups from '../controllers/groups.controller.js';
 import * as props from '../controllers/properties.controller.js';
 import * as listings from '../controllers/listings.controller.js';
+import * as notifications from '../controllers/notifications.controller.js';
 import { requireActiveAccount, requireRole } from '../middleware/auth.js';
 import {
   floorPlanSchema,
@@ -35,6 +36,7 @@ import {
   unitIdParams,
 } from '../validation/application.schemas.js';
 import { MOVES } from '../services/application.service.js';
+import { emptyBody, notificationIdParams } from '../validation/notification.schemas.js';
 
 const router = Router();
 
@@ -230,5 +232,18 @@ for (const [slug, def] of Object.entries(MOVES)) {
   router.post(`/applications/:id/${slug}`, ...chain);
   router.post(`/api/applications/:id/${slug}`, ...chain);
 }
+
+// In-app notifications (B6 part 1). Every role has its own; the service filters
+// by the logged-in user's id, so anyone else's notification is a 404.
+// `read-all` is registered before `:id` so it isn't read as an id.
+const notificationId = validate(notificationIdParams, { source: 'params' });
+const noBody = validate(emptyBody);
+
+router.get('/notifications', notifications.index);
+router.get('/api/notifications', notifications.apiIndex);
+router.post('/notifications/read-all', noBody, notifications.markAllRead);
+router.post('/api/notifications/read-all', noBody, notifications.markAllRead);
+router.post('/notifications/:id/read', notificationId, noBody, notifications.markRead);
+router.post('/api/notifications/:id/read', notificationId, noBody, notifications.markRead);
 
 export default router;
