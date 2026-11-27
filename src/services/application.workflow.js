@@ -20,6 +20,8 @@ export const STATES = Object.freeze({
   EXPIRED: 'EXPIRED',
   REJECTED: 'REJECTED',
   WITHDRAWN: 'WITHDRAWN',
+  /** Closed by the system: the unit was leased to another group, or this group accepted another place. */
+  CLOSED: 'CLOSED',
 });
 
 /** Friendly text for pages, e.g. DOCS_REQUESTED → "Documents requested". */
@@ -33,6 +35,7 @@ export const STATE_LABELS = Object.freeze({
   EXPIRED: 'Offer expired',
   REJECTED: 'Rejected',
   WITHDRAWN: 'Withdrawn',
+  CLOSED: 'Closed',
 });
 
 /** Once an application reaches one of these, nothing can change it. */
@@ -42,19 +45,20 @@ export const FINAL_STATES = Object.freeze([
   STATES.EXPIRED,
   STATES.REJECTED,
   STATES.WITHDRAWN,
+  STATES.CLOSED,
 ]);
 
 /** Who is acting. The service decides which one the logged-in user is. */
 export const ACTORS = Object.freeze({
   GROUP_MEMBER: 'GROUP_MEMBER', // an accepted member of the applying group
   LISTING_OWNER: 'LISTING_OWNER', // the landlord (or sublease poster) who owns the listing
-  SYSTEM: 'SYSTEM', // the app itself, e.g. when an offer's deadline passes
+  SYSTEM: 'SYSTEM', // the app itself: an offer's deadline passing, or closing others on accept
 });
 
 const ACTOR_LABELS = {
   GROUP_MEMBER: 'a member of the applying group',
   LISTING_OWNER: 'the listing owner',
-  SYSTEM: 'the system (when the deadline passes)',
+  SYSTEM: 'the system',
 };
 
 const S = STATES;
@@ -88,6 +92,12 @@ export const TRANSITIONS = Object.freeze(
     { from: S.UNDER_REVIEW, to: S.REJECTED, actor: A.LISTING_OWNER, action: 'reject' },
 
     { from: S.OFFERED, to: S.EXPIRED, actor: A.SYSTEM, action: 'expire offer' },
+    // When a group accepts an offer, the system closes the unit's other open
+    // applications and the group's other open applications (it can't lease two places).
+    { from: S.SUBMITTED, to: S.CLOSED, actor: A.SYSTEM, action: 'close' },
+    { from: S.DOCS_REQUESTED, to: S.CLOSED, actor: A.SYSTEM, action: 'close' },
+    { from: S.UNDER_REVIEW, to: S.CLOSED, actor: A.SYSTEM, action: 'close' },
+    { from: S.OFFERED, to: S.CLOSED, actor: A.SYSTEM, action: 'close' },
   ].map(Object.freeze),
 );
 
@@ -110,6 +120,7 @@ const ACTION_PHRASES = Object.freeze({
   'rescind offer': 'rescind an offer',
   reject: 'reject an application',
   'expire offer': 'expire an offer',
+  close: 'close an application',
 });
 
 /** Readable name for a state in messages ("no application yet" for null). */

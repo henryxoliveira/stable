@@ -10,6 +10,7 @@ import {
   MAX_GROUP_SEATS,
   createGroup as createGroupDirect,
   inviteByEmail as inviteDirect,
+  termLabel,
   upcomingTerms,
 } from '../src/services/group.service.js';
 
@@ -80,7 +81,8 @@ describe('group workflow', () => {
     const page = await amy.get(`/groups/${groupId}`);
     expect(page.status).toBe(200);
     expect(page.text).toContain('Hilltop House');
-    expect(page.text).toContain(TERM);
+    expect(page.text).toContain(termLabel(TERM)); // shown as "Fall 2026", not "FALL-2026"
+    expect(page.text).not.toContain(TERM);
 
     expect((await invite(amy, groupId, 'ben@scu.edu')).status).toBe(201);
     expect((await invite(amy, groupId, 'CAL@scu.edu')).status).toBe(201); // lowercased

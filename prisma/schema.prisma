@@ -291,6 +291,8 @@ enum ApplicationStatus {
   EXPIRED
   REJECTED
   WITHDRAWN
+  /// Closed by the system when the unit is leased to another group, or this group accepts another place.
+  CLOSED
 }
 
 /// Who made a move. Same values as ACTORS in application.workflow.js.

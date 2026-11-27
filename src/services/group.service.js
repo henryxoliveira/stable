@@ -50,6 +50,12 @@ const UPCOMING_TERM_COUNT = 6;
  * @param {Date} [now]
  * @returns {string[]}
  */
+/** "FALL-2026" → "Fall 2026": how a term is shown on pages. */
+export function termLabel(term) {
+  const [season, year] = term.split('-');
+  return `${season[0]}${season.slice(1).toLowerCase()} ${year}`;
+}
+
 export function upcomingTerms(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Los_Angeles',

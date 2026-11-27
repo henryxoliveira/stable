@@ -4,7 +4,7 @@
 <section class="card">
   <p><strong>Status:</strong> <span class="badge"><%= application.statusLabel %></span>
     <% if (application.status === 'OFFERED') { %> · offer open until <strong><%= formatPacific(application.offerExpiresAt) %></strong><% } %></p>
-  <p><strong>Group:</strong> <%= application.group.name %> (<%= application.group.term %>, <%= application.groupSize %> <%= application.groupSize === 1 ? 'person' : 'people' %> when they applied)</p>
+  <p><strong>Group:</strong> <%= application.group.name %> (<%= termLabel(application.group.term) %>, <%= application.groupSize %> <%= application.groupSize === 1 ? 'person' : 'people' %> when they applied)</p>
   <p class="muted">Members: <%= application.group.members.join(', ') %></p>
   <%- include('_actions', { application }) %>
 </section>
