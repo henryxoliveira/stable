@@ -25,6 +25,8 @@ The README is the only project documentation and gets graded. Keep it accurate.
 7. **Small, PR-sized changes.** Run `npm test` and `npm run lint` before finishing. Update README.md when behavior changes.
 8. Validate all input with **zod** (`validate()` middleware). Use Prisma only. Raw SQL only via tagged `$queryRaw`
    templates, never string concatenation.
+9. **No AI attribution in git.** Don't add `Co-Authored-By:` trailers for an AI tool to commit messages, or
+   "Generated with ..." lines to PR descriptions. (`.claude/settings.json` turns these off for Claude Code.)
 
 ## Commands
 

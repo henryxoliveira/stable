@@ -12,5 +12,10 @@
       "Bash(npx prisma migrate reset:*)",
       "Bash(npx prisma db push:*)"
     ]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
   }
 }
