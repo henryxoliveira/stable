@@ -6,6 +6,7 @@
  * effect immediately instead of waiting for the session to expire.
  */
 import { prisma } from '../db/prisma.js';
+import { BLOCKED_STATUSES } from '../services/auth.service.js';
 import { forbidden, unauthorized } from '../utils/httpError.js';
 import { wantsJson } from '../utils/request.js';
 
@@ -24,10 +25,10 @@ export async function loadUser(req, res, next) {
       where: { id: userId },
       select: PUBLIC_USER_FIELDS,
     });
-    if (user && user.status !== 'SUSPENDED') {
+    if (user && !BLOCKED_STATUSES.includes(user.status)) {
       req.user = user;
     } else {
-      // User deleted or suspended since login: drop the stale session.
+      // User deleted, suspended, or rejected since login: drop the stale session.
       await new Promise((resolve) => req.session.destroy(resolve));
     }
   }

@@ -17,6 +17,9 @@ export function verifyPassword(hash, password) {
   return argon2.verify(hash, password);
 }
 
+/** Account statuses that can't log in. A rejected landlord is locked out like a suspended user. */
+export const BLOCKED_STATUSES = Object.freeze(['SUSPENDED', 'REJECTED']);
+
 // Used when the email doesn't exist, so "unknown email" and "wrong password"
 // take about the same time (prevents discovering accounts by timing).
 const dummyHashPromise = hashPassword('not-a-real-password-just-for-timing');
@@ -49,7 +52,7 @@ export async function registerUser({ email, password, role }) {
 
 /**
  * Check credentials. Returns the user on success, or null on any failure
- * (unknown email, wrong password, suspended) so callers show one generic message.
+ * (unknown email, wrong password, suspended or rejected) so callers show one generic message.
  * @param {string} email  normalized (trimmed, lowercased)
  * @param {string} password
  */
@@ -60,6 +63,6 @@ export async function authenticate(email, password) {
     return null;
   }
   const ok = await verifyPassword(user.passwordHash, password);
-  if (!ok || user.status === 'SUSPENDED') return null;
+  if (!ok || BLOCKED_STATUSES.includes(user.status)) return null;
   return { id: user.id, email: user.email, role: user.role, status: user.status };
 }
