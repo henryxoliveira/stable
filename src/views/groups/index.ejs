@@ -14,7 +14,7 @@
       <% invitations.forEach((inv) => { %>
         <li>
           <span><a href="/groups/<%= inv.group.id %>"><%= inv.group.name %></a>
-            · <%= inv.group.term %> · from <%= inv.group.ownerEmail %></span>
+            · <%= termLabel(inv.group.term) %> · from <%= inv.group.ownerEmail %></span>
           <span class="actions">
             <form method="post" action="/invites/<%= inv.id %>/accept" class="inline">
               <input type="hidden" name="_csrf" value="<%= csrfToken() %>">
@@ -39,7 +39,7 @@
     <ul class="rows">
       <% groups.forEach((g) => { %>
         <li>
-          <span><a href="/groups/<%= g.id %>"><%= g.name %></a> · <%= g.term %>
+          <span><a href="/groups/<%= g.id %>"><%= g.name %></a> · <%= termLabel(g.term) %>
             <% if (g.isOwner) { %><span class="badge">owner</span><% } %></span>
           <span>
             <%= g.memberCount %> member<%= g.memberCount === 1 ? '' : 's' %>,

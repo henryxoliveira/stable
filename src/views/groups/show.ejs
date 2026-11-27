@@ -2,7 +2,7 @@
 <% const { group, viewer, members, pendingInvites, events } = detail; %>
 <% const isOwner = viewer.role === 'owner'; %>
 <p><a href="<%= viewer.role === 'admin' ? '/dashboard/admin' : '/groups' %>">← Back</a></p>
-<h1><%= group.name %> <span class="muted">· <%= group.term %></span></h1>
+<h1><%= group.name %> <span class="muted">· <%= termLabel(group.term) %></span></h1>
 <p>
   Owner: <%= group.owner.email %> ·
   <%= detail.seatsUsed %> / <%= detail.maxSeats %> seats ·

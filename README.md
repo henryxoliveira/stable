@@ -811,8 +811,12 @@ browser with its own cookies.
 | 129 | Accept after the group grew too big, got a new invite, or the unit was leased                                 | A                | 409 `GROUP_TOO_BIG` / `GROUP_NOT_READY` / `UNIT_NOT_AVAILABLE`; nothing changes                                                     | ✅ pass (automated)         |
 | 130 | Accept after the landlord's account stopped being ACTIVE                                                      | A, L             | 409 `LANDLORD_NOT_ACTIVE`; unit not leased                                                                                          | ✅ pass (automated)         |
 | 131 | Outsider, landlord, and admin try to accept; bad or missing id; not yet offered                               | S, L, admin      | 404 / 403 / 403; 400 / 404; 409 with the workflow's reason                                                                          | ✅ pass (automated)         |
+| 132 | Apply through the page when it's refused (already applied; group not ready)                                   | A, B             | apply page shown again with the message; a link to the existing application                                                         | ✅ pass (automated)         |
+| 133 | Open the apply page for a unit that isn't available                                                           | A                | no Submit button; a short note instead                                                                                              | ✅ pass (automated)         |
+| 134 | Term shown on the applications pages and the group page                                                       | A                | friendly label ("Fall 2026"), never the raw value                                                                                   | ✅ pass (automated)         |
+| 135 | History after an offer, and after rescinding and offering again                                               | A, L             | the latest "Offer made" line shows its deadline                                                                                     | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-26): **286 tests, 14 files, all passing.**
+Latest run (local, 2026-11-26): **290 tests, 14 files, all passing.**
 
 ## Security review
 

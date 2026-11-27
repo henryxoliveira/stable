@@ -12,21 +12,21 @@ import { wantsJson } from '../utils/request.js';
 
 // --- Page renderers (also used to re-render after a form error) ---
 
-/** "FALL-2026" → "Fall 2026" (dropdown label). */
-function termLabel(term) {
-  const [season, year] = term.split('-');
-  return `${season[0]}${season.slice(1).toLowerCase()} ${year}`;
-}
-
 async function renderIndex(req, res, { status = 200, errors = {}, values = {} } = {}) {
   const data = await groupService.listMyGroups(req.user);
-  const terms = groupService.upcomingTerms().map((value) => ({ value, label: termLabel(value) }));
-  res.status(status).render('groups/index', { ...data, terms, errors, values });
+  const terms = groupService
+    .upcomingTerms()
+    .map((value) => ({ value, label: groupService.termLabel(value) }));
+  res
+    .status(status)
+    .render('groups/index', { ...data, terms, errors, values, termLabel: groupService.termLabel });
 }
 
 async function renderShow(req, res, { status = 200, errors = {}, values = {} } = {}) {
   const detail = await groupService.getGroupDetail(req.user, req.valid.id);
-  res.status(status).render('groups/show', { detail, errors, values });
+  res
+    .status(status)
+    .render('groups/show', { detail, errors, values, termLabel: groupService.termLabel });
 }
 
 /** `validate()` hook: show the create form's field errors on the /groups page. */

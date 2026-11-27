@@ -26,7 +26,7 @@
  * Every status change writes an application_events row in the same transaction.
  */
 import { prisma } from '../db/prisma.js';
-import { badRequest, conflict, forbidden, notFound } from '../utils/httpError.js';
+import { HttpError, badRequest, conflict, forbidden, notFound } from '../utils/httpError.js';
 import {
   ACTORS,
   FINAL_STATES,
@@ -205,6 +205,11 @@ async function viewerRole(db, user, app) {
   throw notFound();
 }
 
+/** Index of the last event that made an offer, or -1. */
+function lastOfferIndex(events) {
+  return events.findLastIndex((e) => e.toStatus === STATES.OFFERED);
+}
+
 /** Shape an application for pages and JSON (no internal fields). */
 function present(app, role) {
   return {
@@ -226,13 +231,16 @@ function present(app, role) {
       propertyName: app.unit.property.name,
       city: app.unit.property.city,
     },
-    events: app.events.map((e) => ({
+    events: app.events.map((e, i) => ({
       actorType: e.actorType,
       actorEmail: e.actor?.email ?? null,
       fromStatus: e.fromStatus,
       toStatus: e.toStatus,
       comment: e.comment,
       createdAt: e.createdAt,
+      // The deadline for the MOST RECENT "Offer made" line (the one the saved
+      // offer_expires_at belongs to). Earlier, rescinded offers don't keep theirs.
+      offerExpiresAt: i === lastOfferIndex(app.events) ? app.offerExpiresAt : null,
     })),
     viewer: { role, moves: role === 'ADMIN' ? [] : movesFor(app.status, role) },
   };
@@ -382,9 +390,12 @@ export async function apply(user, unitId, groupId, now = new Date()) {
       select: { id: true },
     });
     if (open) {
-      throw conflict(
-        'Your group already has an open application for this unit.',
+      // The id lets the apply page link to the group's existing application.
+      throw new HttpError(
+        409,
         'ALREADY_APPLIED',
+        'Your group already has an open application for this unit.',
+        { applicationId: open.id },
       );
     }
 

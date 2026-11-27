@@ -10,9 +10,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createUser, prisma, resetDb } from './helpers/db.js';
 import { newAgent, postForm } from './helpers/http.js';
 import { expireDueOffers, move } from '../src/services/application.service.js';
+import { termLabel } from '../src/services/group.service.js';
+import { formatPacific } from '../src/controllers/applications.controller.js';
 import {
   MISSING_ID,
   NEXT_TERM,
+  TERM,
   act,
   appliedWorld,
   applyAs,
@@ -437,5 +440,78 @@ describe('invalid input', () => {
     await expect(
       prisma.application.update({ where: { id: appId }, data: { status: 'OFFERED' } }),
     ).rejects.toThrow('applications_offer_needs_deadline_check');
+  });
+});
+
+describe('apply page, term labels, and history (UI)', () => {
+  it('a refused apply re-shows the apply page with the message; ALREADY_APPLIED links to the application', async () => {
+    const { amy, ben, unit, group, appId } = await appliedWorld();
+    const opts = { tokenFrom: `/units/${unit.id}/apply` };
+    const res = await postForm(ben.agent, `/units/${unit.id}/apply`, { groupId: group.id }, opts);
+    expect(res.status).toBe(409);
+    expect(res.text).toContain('Apply as a group'); // the apply page, not the error page
+    expect(res.text).toContain('Your group already has an open application for this unit.');
+    expect(res.text).toContain(`<a href="/applications/${appId}">See your group's application</a>`);
+    expect(res.text).toMatch(new RegExp(`<option value="${group.id}" selected`));
+
+    // Not ready: the message is shown, with no link.
+    const solo = await makeGroup('Pending', [amy.user], ['cal@scu.edu'], NEXT_TERM);
+    const notReady = await postForm(
+      amy.agent,
+      `/units/${unit.id}/apply`,
+      { groupId: solo.id },
+      opts,
+    );
+    expect(notReady.status).toBe(409);
+    expect(notReady.text).toContain('Apply as a group');
+    expect(notReady.text).toContain('isn’t ready yet');
+    expect(notReady.text).not.toContain('See your group');
+
+    // The JSON API still answers 409 with the code (and now the existing id).
+    const api = await applyAs(ben, unit.id, group.id);
+    expect(api.status).toBe(409);
+    expect(api.body.error).toMatchObject({
+      code: 'ALREADY_APPLIED',
+      details: { applicationId: appId },
+    });
+  });
+
+  it('the apply page hides the Submit button when the unit is not available', async () => {
+    const { amy, lou } = await world();
+    const leased = await makeUnit(lou.user.id, { label: 'Leased', status: 'LEASED' });
+    const page = await amy.get(`/units/${leased.id}/apply`);
+    expect(page.status).toBe(200);
+    expect(page.text).toContain("This unit isn't available right now.");
+    expect(page.text).not.toContain('Submit application');
+    expect(page.text).not.toContain(`action="/units/${leased.id}/apply"`);
+  });
+
+  it('applications pages show friendly term labels ("Fall 2026", not "FALL-2026")', async () => {
+    const { amy, unit, appId } = await appliedWorld();
+    for (const path of ['/applications', `/applications/${appId}`, `/units/${unit.id}/apply`]) {
+      const text = (await amy.get(path)).text;
+      expect(text, path).toContain(termLabel(TERM));
+      expect(text, path).not.toContain(TERM);
+    }
+  });
+
+  it('the latest "Offer made" history line shows its deadline', async () => {
+    const { amy, lou, appId } = await offeredWorld();
+    const first = (await prisma.application.findUnique({ where: { id: appId } })).offerExpiresAt;
+    const page = (await amy.get(`/applications/${appId}`)).text;
+    expect(page).toContain(`Under review → Offer made (open until ${formatPacific(first)})`);
+
+    // Rescind and offer again: only the latest offer line carries a deadline (the new one).
+    await act(lou, appId, 'rescind');
+    await act(lou, appId, 'offer', { offerDays: 5 });
+    const second = (await prisma.application.findUnique({ where: { id: appId } })).offerExpiresAt;
+    const evts = (await amy.get(`/api/applications/${appId}`)).body.application.events;
+    const offerLines = evts.filter((e) => e.toStatus === 'OFFERED');
+    expect(offerLines).toHaveLength(2);
+    expect(offerLines[0].offerExpiresAt).toBeNull();
+    expect(new Date(offerLines[1].offerExpiresAt).getTime()).toBe(second.getTime());
+    const page2 = (await amy.get(`/applications/${appId}`)).text;
+    expect(page2).toContain(`(open until ${formatPacific(second)})`);
+    expect(page2).not.toContain(`(open until ${formatPacific(first)})`);
   });
 });

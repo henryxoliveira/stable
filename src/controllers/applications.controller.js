@@ -3,9 +3,10 @@
  * then render / redirect (HTML forms) or send JSON (/api/... and fetch clients).
  */
 import * as applications from '../services/application.service.js';
-import { listMyGroups } from '../services/group.service.js';
+import { listMyGroups, termLabel } from '../services/group.service.js';
 import { formatCents } from '../utils/money.js';
 import { STATE_LABELS } from '../services/application.workflow.js';
+import { HttpError } from '../utils/httpError.js';
 import { wantsJson } from '../utils/request.js';
 
 /** Show times on the campus calendar, e.g. "Mar 1, 2027, 5:00 PM Pacific". */
@@ -19,20 +20,42 @@ export function formatPacific(date) {
   return `${text} Pacific`;
 }
 
-const viewHelpers = { formatPacific, formatCents, STATE_LABELS };
+const viewHelpers = { formatPacific, formatCents, STATE_LABELS, termLabel };
 
-/** GET /units/:id/apply: the unit summary and a "choose your group" form. */
-export async function applyPage(req, res) {
+/** The apply page; also re-shown with a message when applying is refused. */
+async function renderApplyPage(
+  req,
+  res,
+  { status = 200, error = null, selectedGroupId = null } = {},
+) {
   const unit = await applications.getApplyableUnit(req.valid.id);
   const { groups } = await listMyGroups(req.user);
-  res.render('applications/apply', { unit, groups, ...viewHelpers });
+  res
+    .status(status)
+    .render('applications/apply', { unit, groups, error, selectedGroupId, ...viewHelpers });
 }
 
-/** POST /units/:id/apply and POST /api/units/:id/applications */
+/** GET /units/:id/apply: the unit summary and a "choose your group" form. */
+export const applyPage = (req, res) => renderApplyPage(req, res);
+
+/**
+ * POST /units/:id/apply and POST /api/units/:id/applications. JSON clients get the
+ * 409 as is; a browser sees the apply page again with the message (and, for
+ * ALREADY_APPLIED, a link to the group's existing application).
+ */
 export async function apply(req, res) {
-  const app = await applications.apply(req.user, req.valid.id, req.valid.groupId);
-  if (wantsJson(req)) return res.status(201).json({ application: app });
-  res.redirect(`/applications/${app.id}`);
+  try {
+    const app = await applications.apply(req.user, req.valid.id, req.valid.groupId);
+    if (wantsJson(req)) return res.status(201).json({ application: app });
+    return res.redirect(`/applications/${app.id}`);
+  } catch (err) {
+    if (!(err instanceof HttpError) || err.status !== 409 || wantsJson(req)) throw err;
+    return renderApplyPage(req, res, {
+      status: 409,
+      error: { message: err.message, applicationId: err.details?.applicationId ?? null },
+      selectedGroupId: req.valid.groupId,
+    });
+  }
 }
 
 /** GET /applications: my groups' applications. */

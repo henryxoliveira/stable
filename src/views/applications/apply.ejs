@@ -1,5 +1,9 @@
 <%- include('../partials/header', { title: 'Apply for ' + unit.label }) %>
 <h1>Apply as a group</h1>
+<% if (locals.error) { %>
+  <p class="alert" role="alert"><%= error.message %>
+    <% if (error.applicationId) { %><a href="/applications/<%= error.applicationId %>">See your group's application</a>.<% } %></p>
+<% } %>
 <section class="card">
   <h2><%= unit.property.name %>, <%= unit.label %></h2>
   <p><%= unit.property.city %> · fits <%= unit.beds %> <%= unit.beds === 1 ? 'person' : 'people' %> ·
@@ -7,7 +11,9 @@
   <% if (unit.status !== 'AVAILABLE') { %><p class="alert">This unit isn't available right now.</p><% } %>
 </section>
 <section class="card">
-  <% if (groups.length === 0) { %>
+  <% if (unit.status !== 'AVAILABLE') { %>
+    <p class="muted">You can't apply for this unit right now.</p>
+  <% } else if (groups.length === 0) { %>
     <p class="muted">You need a roommate group first. <a href="/groups">Create or join one</a>.</p>
   <% } else { %>
     <form method="post" action="/units/<%= unit.id %>/apply">
@@ -15,7 +21,7 @@
       <label for="groupId">Which group is applying?</label>
       <select id="groupId" name="groupId">
         <% groups.forEach((g) => { %>
-          <option value="<%= g.id %>"><%= g.name %> · <%= g.term %> (<%= g.memberCount %> <%= g.memberCount === 1 ? 'member' : 'members' %><%= g.ready ? '' : ', not ready' %>)</option>
+          <option value="<%= g.id %>" <%= locals.selectedGroupId === g.id ? 'selected' : '' %>><%= g.name %> · <%= termLabel(g.term) %> (<%= g.memberCount %> <%= g.memberCount === 1 ? 'member' : 'members' %><%= g.ready ? '' : ', not ready' %>)</option>
         <% }) %>
       </select>
       <p class="muted">A group can apply when everyone invited has accepted, and it fits the unit.</p>
