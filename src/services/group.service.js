@@ -86,9 +86,17 @@ const USER_PUBLIC = { select: { id: true, email: true } };
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Row lock on the student's users row (tagged template, so ids are parameters). */
+/**
+ * Row lock on the acting student's users row (tagged template, so ids are
+ * parameters), then re-check the role while holding the lock. `requireRole`
+ * read the role when the request started, and an admin may have promoted this
+ * account since then. Promotion locks the same row (admin.service.js), so after
+ * this point the role can't change until we commit. Without this check, a
+ * promote landing between the two could leave an admin stuck in a group.
+ */
 async function lockUser(tx, userId) {
-  await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+  const [row] = await tx.$queryRaw`SELECT role FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+  if (row?.role !== 'STUDENT') throw forbidden('Only students can use roommate groups.');
 }
 
 /** Row lock on the group. Missing groups lock nothing; loadAccess() then 404s. */
@@ -189,6 +197,9 @@ export function describeEvent(event) {
     case 'INVITED':
       return `${who} invited ${d.email}`;
     case 'INVITE_CANCELLED':
+      if (d.reason === 'PROMOTED_TO_ADMIN') {
+        return `The invitation to ${d.email} was cancelled because they became a Stable admin`;
+      }
       return `${who} cancelled the invitation to ${d.email}`;
     case 'INVITE_ACCEPTED':
       return `${who} accepted the invitation`;

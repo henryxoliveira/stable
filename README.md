@@ -325,6 +325,8 @@ the first admin exist?
      can't be promoted, so an unapproved landlord can't skip the queue. A student who is in an active
      roommate group (as owner or member) can't be promoted either (`409 IN_ROOMMATE_GROUP`): admins get 403
      on group actions, so they could never leave or hand off the group. They leave it first, then get promoted.
+     Pending invitations don't block promotion: they are cancelled in the same transaction, with a line in
+     each group's history, so the inviting group can still become ready.
    - Each decision is one transaction: an `UPDATE … WHERE status = 'PENDING'` (or `role`/`status` for
      promotion) plus an `account_events` audit row. If two admins decide the same landlord at once, the
      second update matches no rows and gets `409 NOT_PENDING`, so only one decision is ever recorded.
@@ -758,8 +760,10 @@ browser with its own cookies.
 | 101 | Admin views all properties, then tries every edit                                                             | L, L2, admin     | 200 with owner email; 403 on every edit; nothing changes                                                                            | ✅ pass (automated)         |
 | 102 | Anonymous access; landlord POST without a CSRF token                                                          | anonymous, L     | 302 → `/login` / 401; 403 and nothing saved                                                                                         | ✅ pass (automated)         |
 | 103 | Money parser and formatter (`src/utils/money.js`)                                                             | unit test        | exact cents; bad input refused; `$2,400.50` formatting                                                                              | ✅ pass (automated)         |
+| 104 | Student promoted after the role check but before the group service locks their row (accept, create group)     | A, B, admin      | 403; no membership; invite still pending                                                                                            | ✅ pass (automated)         |
+| 105 | Promote a student with pending invites from two groups                                                        | A, C, B, admin   | ADMIN; both invites CANCELLED; both groups ready; history line names the reason                                                     | ✅ pass (automated)         |
 
-Latest run (local, 2026-11-26): **TESTCOUNT**
+Latest run (local, 2026-11-27): **251 tests, 13 files, all passing.**
 
 ## Security review
 
